@@ -256,62 +256,130 @@ class PocketBroker(BaseBroker):
 
 
 class IQBroker(BaseBroker):
-    """Exnova e IQ Option — OTC disponible 24/7 como mercado Digital."""
-    name = "Exnova/IQOption"; broker_id = "iqoption"
+    """
+    Exnova / IQ Option — misma plataforma, distinto dominio.
+    host por defecto: exnova.org  (IQ Option usa iqoption.com)
 
-    async def connect(self):
+    Active IDs de los 5 pares del scanner (estándar IQ Option / Exnova):
+      EURUSD=1  GBPUSD=2  EURJPY=4  EURGBP=5
+      OTC: EURUSD-OTC=76  GBPUSD-OTC=77  EURJPY-OTC=79  EURGBP-OTC=80
+      TRUMPUSD → no disponible en Exnova, usa Binance como fallback
+    """
+    name = "Exnova/IQOption"
+    broker_id = "iqoption"
+
+    # IDs de activos en la plataforma (hardcoded — estándar IQ Option / Exnova)
+    _IDS: dict[str, int] = {
+        "EURUSD":     1,
+        "GBPUSD":     2,
+        "EURJPY":     4,
+        "EURGBP":     5,
+        "EURUSD-OTC": 76,
+        "GBPUSD-OTC": 77,
+        "EURJPY-OTC": 79,
+        "EURGBP-OTC": 80,
+    }
+
+    async def connect(self) -> bool:
         try:
-            from iqoptionapi.stable_api import IQ_Option
-            self._c = IQ_Option(self.config.email, self.config.password)
-            ok, _ = await asyncio.get_event_loop().run_in_executor(None, self._c.connect)
-            if ok:
-                self._c.change_balance("PRACTICE" if self.config.demo else "REAL")
-                self.connected = True
-            return ok
+            from iqoptionapi.api import IQOptionAPI
         except ImportError:
-            print("[IQOption] pip install iqoptionapi"); return False
+            print("[Exnova] pip install iqoptionapi")
+            return False
+        host = self.config.extra.get("host", "exnova.org")
+        self._api = IQOptionAPI(host, self.config.email, self.config.password)
+        try:
+            result = await asyncio.get_event_loop().run_in_executor(
+                None, self._api.connect)
+            ok = result[0] if isinstance(result, (tuple, list)) else bool(result)
+            if ok:
+                self.connected = True
+                print(f"[Exnova] Conectado como {self.config.email}")
+            else:
+                reason = result[1] if isinstance(result, (tuple, list)) else "desconocido"
+                print(f"[Exnova] Fallo de conexion: {reason}")
+            return ok
+        except Exception as e:
+            print(f"[Exnova] Error: {e}")
+            return False
 
     async def disconnect(self):
-        if hasattr(self,'_c'): self._c.close(); self.connected = False
+        if hasattr(self, "_api"):
+            try:
+                self._api.websocket_client.wss.close()
+            except Exception:
+                pass
+        self.connected = False
 
-    async def get_assets(self, market_type="REAL"):
-        """
-        IQ Option / Exnova:
-          REAL → pares forex normales (ej. EURUSD) disponibles lun-vie
-          OTC  → pares digitales 24/7 (ej. EURUSD(OTC)) generados por el broker
-        """
-        if not self.connected: return []
-        all_a = await asyncio.get_event_loop().run_in_executor(
-            None, self._c.get_all_open_time)
+    async def get_assets(self, market_type: str = "REAL") -> list[Asset]:
+        """Retorna los pares disponibles filtrando por mercado."""
+        if not self.connected:
+            return []
+        want_otc = market_type.upper() == "OTC"
         result = []
-        # IQ Option organiza activos en "turbo","binary","digital" para real
-        # y en "forex" con nombre "(OTC)" para el mercado digital/OTC
-        for cat in ("forex", "crypto", "commodity", "turbo", "binary", "digital"):
-            for sym, d in all_a.get(cat, {}).items():
-                if not d.get("open"):
-                    continue
-                pay = d.get("profit", {}).get("front", 0) / 100
-                if pay < 0.75:
-                    continue
-                sym_int  = _to_internal(sym)
-                is_otc   = sym_int.endswith("-OTC")
-                want_otc = market_type.upper() == "OTC"
-                if is_otc != want_otc:
-                    continue
-                cat_norm = "Crypto" if "BTC" in sym_int or "ETH" in sym_int else "Forex"
-                result.append(Asset(sym_int, self.name, pay, True,
-                                    market_type.upper(), cat_norm))
+        for sym, active_id in self._IDS.items():
+            is_otc = sym.endswith("-OTC")
+            if is_otc != want_otc:
+                continue
+            payout = OTC_ASSETS.get(sym, (None, None, 0.82))[2] if is_otc \
+                else REAL_ASSETS.get(sym, (None, None, 0.82))[2]
+            result.append(Asset(
+                symbol=sym, broker=self.name, payout=payout,
+                is_open=True, market_type=market_type.upper(), category="Forex",
+            ))
+        # TRUMPUSD viene de Binance (no está en Exnova)
+        trump_sym = "TRUMPUSD-OTC" if want_otc else "TRUMPUSD"
+        trump_data = OTC_ASSETS.get(trump_sym) or REAL_ASSETS.get(trump_sym)
+        if trump_data:
+            result.append(Asset(
+                symbol=trump_sym, broker=self.name, payout=trump_data[2],
+                is_open=True, market_type=market_type.upper(), category="Crypto",
+            ))
         return result
 
-    async def get_candles(self, symbol, timeframe, count=150):
-        if not self.connected: return []
+    async def get_candles(self, symbol: str, timeframe: int, count: int = 150) -> list[Candle]:
+        # TRUMPUSD no está en Exnova — usar Binance
+        if "TRUMP" in symbol:
+            return await DemoBroker()._binance_candles("TRUMPUSDT", timeframe, count)
+
+        if not self.connected:
+            return []
+
+        active_id = self._IDS.get(symbol)
+        if active_id is None:
+            return []
+
         import time as _t
-        # IQ Option / Exnova usa "EURUSD(OTC)" para el mercado digital
-        broker_sym = _to_broker_otc(symbol, "parens") if symbol.endswith("-OTC") else symbol
-        tf_sec = {60:60, 300:300, 900:900, 3600:3600}.get(timeframe, 300)
-        raw = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: self._c.get_candles(broker_sym, tf_sec, count, _t.time()))
-        return [Candle(int(c.get("from",0)), float(c.get("open",0)),
-                       float(c.get("max",0)),  float(c.get("min",0)),
-                       float(c.get("close",0)), float(c.get("volume",0)))
-                for c in (raw or [])]
+
+        def _fetch_sync():
+            """Bloquea hasta recibir respuesta WebSocket de velas."""
+            self._api.getcandles(active_id, timeframe, count, _t.time())
+            _t.sleep(2.0)   # esperar respuesta WS
+            raw = self._api.candles.data.get(active_id, {}).get(timeframe, {})
+            return raw
+
+        try:
+            raw = await asyncio.get_event_loop().run_in_executor(None, _fetch_sync)
+        except Exception as e:
+            print(f"[Exnova] get_candles {symbol}: {e}")
+            return []
+
+        if not raw:
+            return []
+
+        candles = []
+        items = raw.items() if isinstance(raw, dict) else enumerate(raw)
+        for ts, cd in sorted(items):
+            try:
+                candles.append(Candle(
+                    time=int(float(ts)),
+                    open=float(cd.get("open",  cd.get("o", 0))),
+                    high=float(cd.get("max",   cd.get("h", cd.get("high",  0)))),
+                    low= float(cd.get("min",   cd.get("l", cd.get("low",   0)))),
+                    close=float(cd.get("close",cd.get("c", 0))),
+                    volume=float(cd.get("volume", 0)),
+                ))
+            except Exception:
+                pass
+
+        return candles[-count:]
