@@ -323,6 +323,46 @@ async def api_config(body: dict):
     return {"ok":True,"broker":S.active_broker,"market_type":S.market_type}
 
 
+@app.post("/api/set_ssid")
+async def api_set_ssid(body: dict):
+    """Recibe SSID desde el navegador y conecta Exnova en caliente."""
+    ssid = (body.get("ssid") or "").strip()
+    if not ssid or len(ssid) < 20:
+        return JSONResponse({"error": "SSID inválido"}, status_code=400)
+
+    from brokers.demo import IQBroker
+    from brokers.base import BrokerConfig
+
+    # Conectar usando el SSID directo via WebSocket (sin login HTTP)
+    try:
+        from iqoptionapi.api import IQOptionAPI
+        api = IQOptionAPI("exnova.org", "", "")
+        api.set_session_cookies()
+
+        import threading, time as _t
+        from iqoptionapi.ws.client import WebsocketClient
+
+        api.websocket_client = WebsocketClient(api)
+        ws_thread = threading.Thread(target=api.websocket.run_forever)
+        ws_thread.daemon = True
+        ws_thread.start()
+        _t.sleep(3)
+        api.ssid(ssid)
+        _t.sleep(2)
+
+        iq = IQBroker.__new__(IQBroker)
+        iq.connected = True
+        iq._api = api
+        iq.config = BrokerConfig("", "", True)
+        S.brokers["iqoption"] = iq
+        log.info(f"[Exnova] SSID recibido via /api/set_ssid — OTC activo")
+        await broadcast({"type":"broker_connected","broker":"iqoption"})
+        return {"ok": True, "message": "Exnova conectado — OTC activo 24/7"}
+    except Exception as e:
+        log.warning(f"[Exnova] set_ssid error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.post("/api/outcome")
 async def api_outcome(body: dict):
     sid     = body.get("id")

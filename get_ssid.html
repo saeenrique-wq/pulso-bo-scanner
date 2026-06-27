@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Extraer SSID Exnova</title>
+<style>
+  body{font-family:Arial,sans-serif;background:#0a0f1e;color:#e8edf5;display:flex;
+       align-items:center;justify-content:center;height:100vh;margin:0;}
+  .box{background:#0c1120;border:1px solid rgba(255,255,255,.1);border-radius:16px;
+       padding:32px;max-width:480px;text-align:center;}
+  h2{color:#ffd700;margin-bottom:8px;}
+  p{color:#94a3b8;font-size:.9rem;margin-bottom:24px;}
+  .ssid-box{background:#060912;border:2px solid #00ff87;border-radius:8px;
+             padding:16px;font-size:.8rem;font-family:monospace;word-break:break-all;
+             color:#00ff87;margin-bottom:20px;min-height:50px;line-height:1.5;}
+  .btn{background:linear-gradient(135deg,#00ff87,#00c96b);color:#060912;border:none;
+       border-radius:8px;padding:12px 28px;font-size:1rem;font-weight:800;
+       cursor:pointer;width:100%;margin-bottom:10px;}
+  .btn:active{transform:scale(.97);}
+  .status{font-size:.85rem;color:#94a3b8;margin-top:12px;}
+  .ok{color:#00ff87;}
+  .err{color:#ff2d55;}
+</style>
+</head>
+<body>
+<div class="box">
+  <h2>🔑 Pulso BO Scanner</h2>
+  <p>Extrae el SSID de tu sesión activa de Exnova y lo envía al scanner.</p>
+  <p style="color:#ffd700;font-size:.8rem">⚠️ Debes estar en <b>trade.exnova.com</b> con sesión iniciada</p>
+
+  <div class="ssid-box" id="ssid-display">Buscando SSID...</div>
+
+  <button class="btn" onclick="sendToScanner()">✅ Enviar al Scanner</button>
+  <div class="status" id="status"></div>
+</div>
+
+<script>
+  // Intentar extraer SSID del dominio actual
+  let ssid = '';
+
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+    return null;
+  }
+
+  function init() {
+    // Intentar desde cookies del documento
+    ssid = getCookie('ssid') || '';
+
+    if (!ssid) {
+      // Intentar desde localStorage
+      try {
+        const ls = JSON.parse(localStorage.getItem('user') || '{}');
+        ssid = ls.ssid || ls.session || ls.token || '';
+      } catch(e) {}
+    }
+
+    if (ssid) {
+      document.getElementById('ssid-display').textContent = ssid;
+      document.getElementById('status').innerHTML =
+        '<span class="ok">✅ SSID encontrado — haz clic en Enviar</span>';
+    } else {
+      document.getElementById('ssid-display').textContent =
+        'No encontrado en este dominio.\nAbre esta página desde trade.exnova.com';
+      document.getElementById('status').innerHTML =
+        '<span class="err">⚠️ Abre este archivo mientras estás en trade.exnova.com</span>';
+    }
+  }
+
+  async function sendToScanner() {
+    if (!ssid) {
+      document.getElementById('status').innerHTML =
+        '<span class="err">No hay SSID. Inicia sesión en Exnova primero.</span>';
+      return;
+    }
+    try {
+      const r = await fetch('http://localhost:8082/api/set_ssid', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ssid})
+      });
+      if (r.ok) {
+        document.getElementById('status').innerHTML =
+          '<span class="ok">🚀 SSID enviado al scanner! OTC activo.</span>';
+      } else {
+        throw new Error('HTTP ' + r.status);
+      }
+    } catch(e) {
+      // Si el scanner no está corriendo, mostrar el SSID para copiar manual
+      document.getElementById('status').innerHTML =
+        '<span class="ok">📋 Copia el SSID de arriba y pégalo en el scanner</span>';
+      navigator.clipboard.writeText(ssid).catch(()=>{});
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>
