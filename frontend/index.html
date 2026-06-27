@@ -294,6 +294,11 @@ body{display:flex;flex-direction:column;}
 .fab:active{transform:scale(.9);}
 .fab.spin{animation:fabglow 1.5s ease-in-out infinite;}
 @keyframes fabglow{0%,100%{box-shadow:0 4px 16px rgba(77,159,255,.4)}50%{box-shadow:0 4px 28px rgba(0,229,255,.7)}}
+.fab-reset{position:fixed;bottom:calc(var(--nav) + var(--safe) + 70px);right:14px;
+  width:38px;height:38px;border-radius:50%;background:rgba(255,45,85,.15);
+  border:1.5px solid rgba(255,45,85,.3);cursor:pointer;display:flex;align-items:center;
+  justify-content:center;font-size:.9rem;color:var(--r);z-index:40;transition:all .12s;}
+.fab-reset:active{transform:scale(.9);background:rgba(255,45,85,.3);}
 
 /* ── SECTION HEADER ──────────────────────────────────────── */
 .sh{display:flex;align-items:center;justify-content:space-between;padding:6px 14px 4px;}
@@ -346,13 +351,11 @@ body{display:flex;flex-direction:column;}
   </div>
 </div>
 
-<!-- FILTER: mercado + tipo -->
+<!-- FILTER: solo Real / OTC -->
 <div class="cat-row" id="catrow">
-  <span class="chip on" data-mkt="all"  onclick="setMkt(this)">Todos</span>
+  <span class="chip on" data-mkt="all"  onclick="setMkt(this)">Todas</span>
   <span class="chip"    data-mkt="REAL" onclick="setMkt(this)">🌐 Real</span>
-  <span class="chip"    data-mkt="OTC"  onclick="setMkt(this)">🕐 OTC</span>
-  <span class="chip"    data-mkt="__Forex"  onclick="setMkt(this)">💱 Forex</span>
-  <span class="chip"    data-mkt="__Crypto" onclick="setMkt(this)">🪙 Crypto</span>
+  <span class="chip"    data-mkt="OTC"  onclick="setMkt(this)">🕐 OTC Digital</span>
 </div>
 
 <!-- SCAN BAR -->
@@ -433,6 +436,7 @@ body{display:flex;flex-direction:column;}
 </div><!-- /scroll -->
 
 <button class="fab" id="fab" onclick="doScan()">🔍</button>
+<button class="fab-reset" id="fabreset" onclick="resetSignals()" title="Borrar historial">🗑</button>
 
 <!-- BOTTOM NAV -->
 <nav class="bnav">
@@ -597,11 +601,9 @@ function setMkt(el){
 // ── Render señales ─────────────────────────────────────────
 function render(){
   const filtered = sigs.filter(s=>{
-    if(mktFilter==='all') return true;
+    if(mktFilter==='all')  return true;
     if(mktFilter==='REAL') return (s.market_type||'').toUpperCase()==='REAL';
     if(mktFilter==='OTC')  return (s.market_type||'').toUpperCase()==='OTC';
-    if(mktFilter==='__Forex')  return s.category==='Forex';
-    if(mktFilter==='__Crypto') return s.category==='Crypto';
     return true;
   });
   const cnt = filtered.length;
@@ -681,11 +683,10 @@ function sigCard(s){
         <div class="dt">${s.direction}</div>
       </div>
       <div class="sc-info">
-        <div class="sc-sym">${s.symbol}</div>
+        <div class="sc-sym">${s.symbol.replace('-OTC','')}<span style="font-size:.65rem;color:var(--t2);font-weight:500;margin-left:6px">${mt==='OTC'?'OTC Digital':'Real'}</span></div>
         <div class="sc-row">
-          <span class="mbadge ${mt}">${mt}</span>
-          <span class="mtag">${s.expiration}min</span>
-          <span class="mtag">${s.payout}% payout</span>
+          <span class="mtag">Expiración ${s.expiration}min</span>
+          <span class="mtag">${s.payout}% ganancia</span>
           ${ai}
         </div>
         <div class="hm" style="margin-top:6px">${tfs}</div>
@@ -856,6 +857,15 @@ function tickTimers(){
       if(sig) pushNotif(sig);
     }
   });
+}
+
+// ── Reset historial ────────────────────────────────────────
+async function resetSignals(){
+  if(!confirm('Borrar todo el historial de señales?')) return;
+  try{
+    await fetch(API+'/api/signals/reset',{method:'POST'});
+    sigs=[]; render(); toast('Historial borrado');
+  }catch(e){ toast('Error al borrar'); }
 }
 
 // ── INIT ───────────────────────────────────────────────────

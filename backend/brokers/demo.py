@@ -5,63 +5,30 @@ import asyncio
 from typing import Optional
 import pandas as pd
 import yfinance as yf
-import httpx
 
 from .base import Asset, BaseBroker, BrokerConfig, Candle
 
-# ── LOS 5 PARES QUE ESCANEA ESTE BOT ────────────────────────
-# EURUSD, TRUMP COIN, EURJPY, EURGBP, GBPUSD
-TOP5_REAL = ["EURUSD", "TRUMPUSD", "EURJPY", "EURGBP", "GBPUSD"]
-TOP5_OTC  = ["EURUSD-OTC", "TRUMPUSD-OTC", "EURJPY-OTC", "EURGBP-OTC", "GBPUSD-OTC"]
+# ── 4 PARES OPCIONES BINARIAS ─────────────────────────────
+TOP5_REAL = ["EURUSD", "EURJPY", "EURGBP", "GBPUSD"]
+TOP5_OTC  = ["EURUSD-OTC", "EURJPY-OTC", "EURGBP-OTC", "GBPUSD-OTC"]
 
-# ── ACTIVOS — prefijo "binance:" usa Binance API, resto usa yfinance ──
-# (ticker, categoria, payout)
+# (ticker_yfinance, categoria, payout)
 REAL_ASSETS = {
-    "EURUSD":   ("EURUSD=X",          "Forex",  0.87),
-    "GBPUSD":   ("GBPUSD=X",          "Forex",  0.86),
-    "EURJPY":   ("EURJPY=X",          "Forex",  0.85),
-    "EURGBP":   ("EURGBP=X",          "Forex",  0.82),
-    "USDJPY":   ("USDJPY=X",          "Forex",  0.85),
-    "AUDUSD":   ("AUDUSD=X",          "Forex",  0.84),
-    "USDCAD":   ("USDCAD=X",          "Forex",  0.84),
-    "USDCHF":   ("USDCHF=X",          "Forex",  0.83),
-    "NZDUSD":   ("NZDUSD=X",          "Forex",  0.82),
-    "GBPJPY":   ("GBPJPY=X",          "Forex",  0.84),
-    "XAUUSD":   ("GC=F",              "Commodities", 0.88),
-    "XAGUSD":   ("SI=F",              "Commodities", 0.83),
-    "USOIL":    ("CL=F",              "Commodities", 0.80),
-    "BTCUSD":   ("BTC-USD",           "Crypto", 0.86),
-    "ETHUSD":   ("ETH-USD",           "Crypto", 0.85),
-    "XRPUSD":   ("XRP-USD",           "Crypto", 0.83),
-    "TRUMPUSD": ("binance:TRUMPUSDT", "Crypto", 0.82),  # Binance API
-    "US30":     ("^DJI",              "Indices", 0.80),
-    "US500":    ("^GSPC",             "Indices", 0.80),
-    "US100":    ("^NDX",              "Indices", 0.80),
+    "EURUSD": ("EURUSD=X", "BO", 0.87),
+    "GBPUSD": ("GBPUSD=X", "BO", 0.86),
+    "EURJPY": ("EURJPY=X", "BO", 0.85),
+    "EURGBP": ("EURGBP=X", "BO", 0.82),
 }
 
 OTC_ASSETS = {
-    "EURUSD-OTC":   ("EURUSD=X",          "OTC", 0.84),
-    "GBPUSD-OTC":   ("GBPUSD=X",          "OTC", 0.83),
-    "EURJPY-OTC":   ("EURJPY=X",          "OTC", 0.82),
-    "EURGBP-OTC":   ("EURGBP=X",          "OTC", 0.80),
-    "USDJPY-OTC":   ("USDJPY=X",          "OTC", 0.82),
-    "AUDUSD-OTC":   ("AUDUSD=X",          "OTC", 0.82),
-    "USDCAD-OTC":   ("USDCAD=X",          "OTC", 0.81),
-    "USDCHF-OTC":   ("USDCHF=X",          "OTC", 0.81),
-    "NZDUSD-OTC":   ("NZDUSD=X",          "OTC", 0.80),
-    "GBPJPY-OTC":   ("GBPJPY=X",          "OTC", 0.81),
-    "USDBRL-OTC":   ("BRL=X",             "OTC", 0.82),
-    "USDMXN-OTC":   ("MXN=X",             "OTC", 0.80),
-    "XAUUSD-OTC":   ("GC=F",              "OTC", 0.85),
-    "BTCUSD-OTC":   ("BTC-USD",           "OTC", 0.83),
-    "TRUMPUSD-OTC": ("binance:TRUMPUSDT", "OTC", 0.81),
+    "EURUSD-OTC": ("EURUSD=X", "BO", 0.84),
+    "GBPUSD-OTC": ("GBPUSD=X", "BO", 0.83),
+    "EURJPY-OTC": ("EURJPY=X", "BO", 0.82),
+    "EURGBP-OTC": ("EURGBP=X", "BO", 0.80),
 }
 
-_TF_YF  = {60: "1m", 300: "5m", 900: "15m", 3600: "1h"}
-_TF_BIN = {60: "1m", 300: "5m", 900: "15m", 3600: "1h"}
-_ALL    = {**REAL_ASSETS, **OTC_ASSETS}
-
-BINANCE_URL = "https://api.binance.com/api/v3/klines"
+_TF  = {60: "1m", 300: "5m", 900: "15m", 3600: "1h"}
+_ALL = {**REAL_ASSETS, **OTC_ASSETS}
 
 
 class DemoBroker(BaseBroker):
@@ -90,37 +57,10 @@ class DemoBroker(BaseBroker):
         entry = _ALL.get(symbol)
         if not entry:
             return []
-        ticker = entry[0]
+        return await self._yf(entry[0], timeframe, count)
 
-        if ticker.startswith("binance:"):
-            return await self._binance_candles(ticker[8:], timeframe, count)
-        return await self._yfinance_candles(ticker, timeframe, count)
-
-    async def _binance_candles(self, pair: str, timeframe: int, count: int) -> list[Candle]:
-        interval = _TF_BIN.get(timeframe, "5m")
-        try:
-            async with httpx.AsyncClient(timeout=10) as c:
-                r = await c.get(BINANCE_URL, params={
-                    "symbol": pair, "interval": interval, "limit": count
-                })
-            if r.status_code != 200:
-                return []
-            return [
-                Candle(
-                    time   = int(k[0]) // 1000,
-                    open   = float(k[1]),
-                    high   = float(k[2]),
-                    low    = float(k[3]),
-                    close  = float(k[4]),
-                    volume = float(k[5]),
-                )
-                for k in r.json()
-            ]
-        except Exception:
-            return []
-
-    async def _yfinance_candles(self, ticker: str, timeframe: int, count: int) -> list[Candle]:
-        interval = _TF_YF.get(timeframe, "5m")
+    async def _yf(self, ticker: str, timeframe: int, count: int) -> list[Candle]:
+        interval = _TF.get(timeframe, "5m")
         period   = "3d" if timeframe <= 300 else "7d"
         try:
             df = await asyncio.get_event_loop().run_in_executor(
@@ -260,10 +200,9 @@ class IQBroker(BaseBroker):
     Exnova / IQ Option — misma plataforma, distinto dominio.
     host por defecto: exnova.org  (IQ Option usa iqoption.com)
 
-    Active IDs de los 5 pares del scanner (estándar IQ Option / Exnova):
+    Active IDs de los 4 pares BO (estándar IQ Option / Exnova):
       EURUSD=1  GBPUSD=2  EURJPY=4  EURGBP=5
       OTC: EURUSD-OTC=76  GBPUSD-OTC=77  EURJPY-OTC=79  EURGBP-OTC=80
-      TRUMPUSD → no disponible en Exnova, usa Binance como fallback
     """
     name = "Exnova/IQOption"
     broker_id = "iqoption"
@@ -327,21 +266,10 @@ class IQBroker(BaseBroker):
                 symbol=sym, broker=self.name, payout=payout,
                 is_open=True, market_type=market_type.upper(), category="Forex",
             ))
-        # TRUMPUSD viene de Binance (no está en Exnova)
-        trump_sym = "TRUMPUSD-OTC" if want_otc else "TRUMPUSD"
-        trump_data = OTC_ASSETS.get(trump_sym) or REAL_ASSETS.get(trump_sym)
-        if trump_data:
-            result.append(Asset(
-                symbol=trump_sym, broker=self.name, payout=trump_data[2],
-                is_open=True, market_type=market_type.upper(), category="Crypto",
-            ))
+        pass  # solo los 4 pares BO listados arriba
         return result
 
     async def get_candles(self, symbol: str, timeframe: int, count: int = 150) -> list[Candle]:
-        # TRUMPUSD no está en Exnova — usar Binance
-        if "TRUMP" in symbol:
-            return await DemoBroker()._binance_candles("TRUMPUSDT", timeframe, count)
-
         if not self.connected:
             return []
 

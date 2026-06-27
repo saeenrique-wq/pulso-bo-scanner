@@ -247,6 +247,20 @@ async def api_signals(broker:str="", market:str="", cat:str="", direction:str=""
     return sigs[:50]
 
 
+@app.post("/api/signals/reset")
+async def api_reset_signals():
+    """Borra todo el historial de señales (en memoria y BD)."""
+    from analysis.tracker import reset as reset_tracker
+    S.signals.clear()
+    try:
+        reset_tracker()
+    except Exception:
+        pass
+    await broadcast({"type": "reset"})
+    log.info("Historial de senales borrado")
+    return {"ok": True, "msg": "Historial borrado"}
+
+
 @app.get("/api/stats")
 async def api_stats():
     return stats()

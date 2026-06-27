@@ -67,4 +67,10 @@ def stats() -> dict:
             "win_rate": round(w/t*100,1) if t else 0,
             "recent": [dict(x) for x in recent]}
 
+def reset():
+    """Borra todo el historial de señales."""
+    with _db() as con:
+        con.execute("DELETE FROM signals")
+        con.execute("DELETE FROM sqlite_sequence WHERE name='signals'")
+
 init()
