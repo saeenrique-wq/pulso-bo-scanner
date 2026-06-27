@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: pulso-bo-scanner
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && python main.py
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: OLLAMA_ENABLED
+        value: "false"
+      - key: ENABLED_BROKERS
+        value: demo
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false

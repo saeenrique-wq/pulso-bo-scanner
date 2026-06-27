@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -22,7 +23,28 @@ from utils.telegram      import send as tg_send
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="Pulso BO Scanner PRO", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # startup
+    S.brokers = _build_brokers()
+    for bid, b in S.brokers.items():
+        ok = await b.connect()
+        log.info(f"[{bid}] {'OK' if ok else 'FAIL'}")
+    if S.active_broker not in S.brokers:
+        S.active_broker = next(iter(S.brokers), "demo")
+    S.ollama_active = await ollama_ok(cfg.OLLAMA_MODEL)
+    log.info(f"Ollama: {'activo' if S.ollama_active else 'no disponible'}")
+    task = asyncio.create_task(scanner_loop())
+    yield
+    # shutdown
+    S.scanning = False
+    task.cancel()
+    for b in S.brokers.values():
+        await b.disconnect()
+
+
+app = FastAPI(title="Pulso BO Scanner PRO", version="1.0.0", lifespan=lifespan)
 FRONTEND = Path(__file__).parent.parent / "frontend"
 
 BROKER_META = {
@@ -141,27 +163,6 @@ async def scanner_loop():
             await scan_once()
             await broadcast({"type":"scan_done","ts":time.time()})
         await asyncio.sleep(cfg.SCAN_INTERVAL)
-
-
-# ── Startup / shutdown ─────────────────────────────────────
-@app.on_event("startup")
-async def startup():
-    S.brokers = _build_brokers()
-    for bid, b in S.brokers.items():
-        ok = await b.connect()
-        log.info(f"[{bid}] {'✓' if ok else '✗'}")
-    if S.active_broker not in S.brokers:
-        S.active_broker = next(iter(S.brokers), "demo")
-    S.ollama_active = await ollama_ok(cfg.OLLAMA_MODEL)
-    log.info(f"Ollama: {'activo ✓' if S.ollama_active else 'no disponible'}")
-    asyncio.create_task(scanner_loop())
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    S.scanning = False
-    for b in S.brokers.values():
-        await b.disconnect()
 
 
 # ── Endpoints ──────────────────────────────────────────────
