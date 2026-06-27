@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from analysis.strategy  import analyze
 from analysis.reviewer  import SignalReviewer
-from analysis.tracker   import save as save_sig, mark as mark_sig, win_rate, stats
+from analysis.tracker   import save as save_sig, mark as mark_sig, win_rate, stats, load_recent
 from ai.ollama_validator import validate as ai_validate, is_available as ollama_ok, MIN_AI_SCORE
 from brokers.base        import BaseBroker, BrokerConfig
 from brokers.demo        import DemoBroker, QuotexBroker, PocketBroker, IQBroker
@@ -38,6 +38,9 @@ async def lifespan(app: FastAPI):
         S.active_broker = next(iter(S.brokers), "demo")
     S.ollama_active = await ollama_ok(cfg.OLLAMA_MODEL)
     log.info(f"Ollama: {'activo' if S.ollama_active else 'no disponible'}")
+    # Recuperar historial de señales de la BD
+    S.signals = load_recent(100)
+    log.info(f"Historial cargado: {len(S.signals)} señales")
     task = asyncio.create_task(scanner_loop())
     yield
     # shutdown

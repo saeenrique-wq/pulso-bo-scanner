@@ -67,6 +67,27 @@ def stats() -> dict:
             "win_rate": round(w/t*100,1) if t else 0,
             "recent": [dict(x) for x in recent]}
 
+def load_recent(limit: int = 100) -> list[dict]:
+    """Carga las últimas señales de la BD para recuperar historial al reiniciar."""
+    with _db() as con:
+        rows = con.execute("""SELECT id,symbol,broker,direction,score,ai_score,
+            payout,expiration,market_type,category,kelly_pct,timestamp,outcome
+            FROM signals ORDER BY id DESC LIMIT ?""", (limit,)).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d.setdefault("entry_time", 0.0)
+        d.setdefault("expiry_time", 0.0)
+        d.setdefault("reasons", [])
+        d.setdefault("tf_results", [])
+        d.setdefault("volatility", 0.0)
+        d.setdefault("win_rate_hist", 0.0)
+        d["payout"] = round((d.get("payout") or 0) * 100, 1)
+        d["ai_score"] = round((d.get("ai_score") or 0) * 100, 1)
+        d["kelly_pct"] = round((d.get("kelly_pct") or 0) * 100, 1)
+        result.append(d)
+    return result
+
 def reset():
     """Borra todo el historial de señales."""
     with _db() as con:

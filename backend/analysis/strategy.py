@@ -19,7 +19,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from .indicators import adx, atr, bollinger, chop_index, ema, macd, rsi, stoch
+from .indicators import adx, bollinger, chop_index, ema, macd, rsi, stoch
 
 Direction = Literal["CALL", "PUT"]
 
@@ -234,32 +234,19 @@ def _patterns(df: pd.DataFrame) -> tuple[Direction | None, int, list[str]]:
     return None, 0, []
 
 
-def _is_inside_bar(df: pd.DataFrame) -> bool:
-    """Vela actual completamente dentro de la previa = indecisión, NO operar."""
-    if len(df) < 2:
-        return False
-    c, p = df.iloc[-1], df.iloc[-2]
-    return float(c.high) <= float(p.high) and float(c.low) >= float(p.low)
-
-
-def _noise_filter(df: pd.DataFrame, min_body_atr_ratio: float = 0.20) -> bool:
-    """True = hay ruido, descartar. Fast path antes del análisis completo."""
-    if len(df) < 15:
+def _noise_filter(df: pd.DataFrame) -> bool:
+    """
+    True = datos rotos (vela literalmente sin movimiento).
+    El CHOP index (MAX_CHOP=60) ya filtra mercados laterales.
+    No bloqueamos inside bars ni cuerpos pequeños — el patrón decide.
+    """
+    if len(df) < 10:
         return True
     c = df.iloc[-1]
-    body = abs(float(c.close) - float(c.open))
-    # Cuerpo mínimo relativo a ATR(5): evita microruido de 1-2 pips
-    av = atr(df["high"], df["low"], df["close"], 5).iloc[-1]
-    if av > 0 and body < av * min_body_atr_ratio:
-        return True
-    # Inside bar = indecisión, no operar
-    if _is_inside_bar(df):
-        return True
-    # Mercado completamente plano (últimas 8 velas con rango mínimo)
-    span = df["close"].tail(8)
-    if (span.max() - span.min()) / (span.mean() or 1) < 0.0002:
-        return True
-    return False
+    rng = float(c.high) - float(c.low)
+    price = float(c.close) or 1.0
+    # Solo rechaza velas con rango < 0.1 pip en EURUSD (datos rotos/broker glitch)
+    return rng / price < 0.000009
 
 
 def _sr_proximity(price: float, high_s: pd.Series, low_s: pd.Series,
@@ -318,7 +305,7 @@ def _analyze_m1(df: pd.DataFrame) -> TFResult:
         return res
 
     # Filtro de ruido rápido (cuerpo mínimo 15% ATR en M1 — más permisivo)
-    if _noise_filter(df, min_body_atr_ratio=0.15):
+    if _noise_filter(df):
         res.reasons = ["Ruido M1: cuerpo insignificante / inside bar"]
         return res
 
@@ -429,7 +416,7 @@ def _analyze_m5(df: pd.DataFrame) -> TFResult:
         res.reasons = [f"Lateral CHOP={res.chop:.0f}"]
         return res
 
-    if _noise_filter(df, min_body_atr_ratio=0.18):
+    if _noise_filter(df):
         res.reasons = ["Ruido M5: cuerpo/inside bar"]
         return res
 
@@ -534,7 +521,7 @@ def _analyze_m15(df: pd.DataFrame) -> TFResult:
         res.reasons = [f"Lateral CHOP={res.chop:.0f}"]
         return res
 
-    if _noise_filter(df, min_body_atr_ratio=0.22):
+    if _noise_filter(df):
         res.reasons = ["Ruido M15: cuerpo/inside bar"]
         return res
 

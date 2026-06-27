@@ -833,28 +833,34 @@ function ago(ts){
 // ── Actualizar timers de entrada cada segundo ───────────────
 function tickTimers(){
   document.querySelectorAll('[data-entry]').forEach(box=>{
-    const id      = box.id.replace('etb-','');
-    const entry   = parseFloat(box.dataset.entry);
-    const expiry  = parseFloat(box.dataset.expiry);
-    const now     = Date.now()/1000;
-    const st      = timerState(entry);
-    const cd      = document.getElementById('ecd-'+id);
+    const id     = box.id.replace('etb-','');
+    const entry  = parseFloat(box.dataset.entry);
+    const expiry = parseFloat(box.dataset.expiry);
+    const now    = Date.now()/1000;
+    const cd     = document.getElementById('ecd-'+id);
 
-    if(st.past){
-      // Señal expirada — opacar
-      box.style.opacity='0.35';
+    if(now < entry){
+      // Antes de entrada: countdown
+      const st = timerState(entry);
+      box.style.opacity = '1';
+      box.className = 'entry-box ' + st.cls;
+      if(cd) cd.textContent = st.label;
+      if(st.secs <= 10 && st.secs > 0 && !box._notified){
+        box._notified = true;
+        const sig = sigs.find(x => x.id == id);
+        if(sig) pushNotif(sig);
+      }
+    } else if(now < expiry){
+      // En posición: mostrar tiempo restante de la opción
+      const rem = Math.round(expiry - now);
+      box.style.opacity = '1';
+      box.className = 'entry-box timer-warn';
+      if(cd) cd.textContent = '⏳ ' + rem + 's';
+    } else {
+      // Opción expirada: botones WIN/LOSS visibles 5 min, luego opacar
+      box.style.opacity = now > expiry + 300 ? '0.35' : '1';
+      box.className = 'entry-box';
       if(cd) cd.textContent = 'EXPIRADO';
-      return;
-    }
-    // Actualizar clase y countdown
-    box.className = 'entry-box '+st.cls;
-    if(cd) cd.textContent = st.label;
-
-    // Notificación cuando quedan ≤ 10 segundos
-    if(st.secs <= 10 && st.secs > 0 && !box._notified){
-      box._notified = true;
-      const sig = sigs.find(x=>x.id==id);
-      if(sig) pushNotif(sig);
     }
   });
 }
