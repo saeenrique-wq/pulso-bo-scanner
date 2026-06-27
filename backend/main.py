@@ -318,7 +318,7 @@ async def api_config(body: dict):
 async def api_outcome(body: dict):
     sid     = body.get("id")
     outcome = body.get("outcome","").upper()
-    if sid is None or outcome not in ("WIN","LOSS"):
+    if sid is None or outcome not in ("WIN","LOSS","NO_TOMADA"):
         return JSONResponse({"error":"Need id and outcome"},status_code=400)
 
     # Normalizar id para comparar correctamente (JSON envía int o string)

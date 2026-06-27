@@ -214,6 +214,11 @@ body{display:flex;flex-direction:column;}
 .outcome-badge{padding:4px 10px;border-radius:6px;font-size:.68rem;font-weight:800;}
 .outcome-badge.WIN{background:rgba(0,255,135,.1);color:var(--g);}
 .outcome-badge.LOSS{background:rgba(255,45,85,.1);color:var(--r);}
+.outcome-badge.NO_TOMADA{background:rgba(255,140,0,.1);color:var(--orange);}
+.entry-box.timer-grace{border-color:var(--orange)!important;background:rgba(255,140,0,.05)!important;}
+.entry-box.timer-grace .entry-countdown{color:var(--orange)!important;animation:grace-pulse 1s ease-in-out infinite;}
+@keyframes grace-pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.r-out.NO_TOMADA{background:rgba(255,140,0,.15);color:var(--orange);}
 
 /* ── EMPTY STATE ─────────────────────────────────────────── */
 .empty{text-align:center;padding:48px 16px;}
@@ -787,7 +792,10 @@ function sigCard(s){
 
   // ── Resultado ──────────────────────────────────────────────
   const outcomeHtml = s.outcome
-    ? `<div class="outcome-badge ${s.outcome}">${s.outcome==='WIN'?'✅ GANADA':'❌ PERDIDA'}</div>`
+    ? `<div class="outcome-badge ${s.outcome}">${
+        s.outcome==='WIN'?'✅ GANADA':
+        s.outcome==='LOSS'?'❌ PERDIDA':
+        '⚠️ NO TOMADA'}</div>`
     : `<div class="outcomes">
         <button class="btn-w" onclick="markOut('${s.id}','WIN',event)">✅ Gané</button>
         <button class="btn-l" onclick="markOut('${s.id}','LOSS',event)">❌ Perdí</button>
@@ -843,7 +851,10 @@ async function markOut(id, outcome, ev){
     sigs = sigs.filter(x => String(x.id) !== String(id));
     render();
     loadStats();
-    toast(outcome==='WIN' ? '✅ Ganada — enviada al historial' : '❌ Perdida — enviada al historial');
+    const msg = outcome==='WIN'?'✅ Ganada — al historial'
+              : outcome==='LOSS'?'❌ Perdida — al historial'
+              : '⚠️ Sin resultado — registrada como No Tomada';
+    toast(msg);
   }catch(e){ toast('❌ Error al registrar resultado'); }
 }
 
@@ -875,7 +886,7 @@ async function loadStats(){
             ${ts?`<span class="hi-time">${ts}</span>`:''}
           </div>
         </div>
-        <span class="r-out ${s.outcome}">${s.outcome==='WIN'?'✅ WIN':'❌ LOSS'}</span>
+        <span class="r-out ${s.outcome}">${s.outcome==='WIN'?'✅ WIN':s.outcome==='LOSS'?'❌ LOSS':'⚠️ NT'}</span>
       </div>`;
     }).join('') || `<div style="padding:16px 14px;color:var(--t2);font-size:.76rem">
       Sin historial todavía. Cuando marques señales como ✅ Gané o ❌ Perdí, aparecerán aquí.</div>`;
@@ -974,6 +985,8 @@ function ago(ts){
 }
 
 // ── Actualizar timers de entrada cada segundo ───────────────
+const _autoMarked = new Set();
+
 function tickTimers(){
   document.querySelectorAll('[data-entry]').forEach(box=>{
     const id     = box.id.replace('etb-','');
@@ -981,6 +994,11 @@ function tickTimers(){
     const expiry = parseFloat(box.dataset.expiry);
     const now    = Date.now()/1000;
     const cd     = document.getElementById('ecd-'+id);
+    const grace  = expiry > 0 ? expiry + 60 : 0; // 1 min para marcar resultado
+
+    if(!expiry || expiry === 0){
+      return; // sin datos de tiempo, no hacer nada
+    }
 
     if(now < entry){
       // Antes de entrada: countdown
@@ -994,16 +1012,30 @@ function tickTimers(){
         if(sig) pushNotif(sig);
       }
     } else if(now < expiry){
-      // En posición: mostrar tiempo restante de la opción
+      // En posición: mostrar tiempo restante
       const rem = Math.round(expiry - now);
       box.style.opacity = '1';
       box.className = 'entry-box timer-warn';
       if(cd) cd.textContent = '⏳ ' + rem + 's';
+    } else if(now < grace){
+      // Grace period (1 min): botones WIN/LOSS activos, cuenta regresiva naranja
+      const rem = Math.round(grace - now);
+      box.style.opacity = '1';
+      box.className = 'entry-box timer-grace';
+      if(cd) cd.textContent = `⏰ Marcar: ${rem}s`;
     } else {
-      // Opción expirada: botones WIN/LOSS visibles 5 min, luego opacar
-      box.style.opacity = now > expiry + 300 ? '0.35' : '1';
+      // Tiempo agotado — auto-marcar NO_TOMADA si aún sin resultado
+      if(!_autoMarked.has(id)){
+        const sig = sigs.find(x => String(x.id) === String(id) && !x.outcome);
+        if(sig){
+          _autoMarked.add(id);
+          markOut(id, 'NO_TOMADA', null);
+          return;
+        }
+      }
+      box.style.opacity = '0.25';
       box.className = 'entry-box';
-      if(cd) cd.textContent = 'EXPIRADO';
+      if(cd) cd.textContent = 'NO TOMADA';
     }
   });
 }
