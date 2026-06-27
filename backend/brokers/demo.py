@@ -8,6 +8,11 @@ import yfinance as yf
 
 from .base import Asset, BaseBroker, BrokerConfig, Candle
 
+# ── TOP 5 MÁS OPERADOS EN PLATAFORMAS BO ──────────────────
+# Escaneados primero y con prioridad — los de mayor volumen y señales
+TOP5_REAL = ["EURUSD", "GBPUSD", "XAUUSD", "BTCUSD", "USDJPY"]
+TOP5_OTC  = ["EURUSD-OTC", "GBPUSD-OTC", "XAUUSD-OTC", "USDJPY-OTC", "AUDUSD-OTC"]
+
 # ── ACTIVOS REALES — exactamente los disponibles en Quotex / IQ Option / Exnova / Pocket Option ──
 # (sym_bo): (ticker_yfinance, categoria_bo, payout_tipico)
 REAL_ASSETS = {

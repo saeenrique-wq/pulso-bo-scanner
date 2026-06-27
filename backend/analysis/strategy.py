@@ -1,20 +1,13 @@
-"""Estrategia de alta efectividad para opciones binarias.
+"""Estrategias optimizadas por timeframe para opciones binarias.
 
-Objetivo: >80% de señales ganadoras mediante:
-  1. Chop Filter — NO operar en mercados laterales (CHOP > 61.8)
-  2. Trend Streak — mínimo 3 velas consecutivas en dirección
-  3. Confluencia 4/4 en indicadores clave
-  4. Multi-TF: M1 + M5 + M15 deben TODOS coincidir
-  5. Score mínimo 78/100
+M1  — Reversión rápida: RSI extremo + BB toque + patrón vela + Stoch
+M5  — Momentum: MACD cross + EMA alineación + ADX + RSI
+M15 — Tendencia: EMA triple + ADX fuerte + MACD + soporte/resistencia
 
-Sistema de puntuación (100 pts):
-  RSI extremo           20 pts
-  MACD crossover        20 pts
-  Bollinger touch       15 pts
-  EMA triple alineada   15 pts
-  ADX > 25 + DI        10 pts
-  Stoch extremo         10 pts
-  Patrón de vela        10 pts
+Volatility score (0-100):
+  < 20 = mercado dormido — señal arriesgada para M1
+  20-70 = condición ideal para operar
+  > 70 = alta volatilidad — arriesgado para M5/M15
 """
 from __future__ import annotations
 
@@ -22,6 +15,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 
 from .indicators import (adx, atr, bollinger, candle_patterns, chop_index,
@@ -29,19 +23,16 @@ from .indicators import (adx, atr, bollinger, candle_patterns, chop_index,
 
 Direction = Literal["CALL", "PUT"]
 
-MIN_SCORE   = 20    # score mínimo por TF individual para contar dirección
-MIN_COMPOSITE = 28  # score compuesto mínimo — AI Ollama hace el filtro fino
-MIN_TF_AGREE = 2    # 2 de 3 TF deben coincidir (mayoría)
-MAX_CHOP    = 61.8  # rechazar si mercado es lateral
-MIN_STREAK  = 1     # al menos 1 vela en dirección
-MIN_PAYOUT  = 0.80
+# ── Umbrales globales ──────────────────────────────────────
+MIN_COMPOSITE = 25   # score compuesto mínimo — Ollama filtra el resto
+MIN_TF_AGREE  = 2    # mayoría de TF (2 de 3) deben coincidir
+MAX_CHOP      = 65.0 # rechazar mercado lateral muy pronunciado
+MIN_PAYOUT    = 0.80
 
 TIMEFRAMES = [60, 300, 900]
 TF_NAMES   = {60: "M1", 300: "M5", 900: "M15"}
-EXPIRATION = {60: 1, 300: 5, 900: 15}
-
-# Pesos por TF — M15 tiene más peso porque filtra más ruido
-WEIGHTS = {60: 0.25, 300: 0.35, 900: 0.40}
+EXPIRATION = {60: 1,  300: 5,  900: 15}
+WEIGHTS    = {60: 0.25, 300: 0.35, 900: 0.40}
 
 
 @dataclass
@@ -51,6 +42,7 @@ class TFResult:
     score: int
     reasons: list[str] = field(default_factory=list)
     chop: float = 50.0
+    volatility: float = 50.0
 
 
 @dataclass
@@ -61,39 +53,43 @@ class Signal:
     score: int
     payout: float
     expiration: int
-    market_type: str = "REAL"
-    category: str = "forex"
-    timestamp: float = field(default_factory=time.time)
-    reasons: list[str] = field(default_factory=list)
-    tf_results: list[TFResult] = field(default_factory=list)
+    market_type: str  = "REAL"
+    category: str     = "Forex"
+    timestamp: float  = field(default_factory=time.time)
+    reasons: list[str]        = field(default_factory=list)
+    tf_results: list[TFResult]= field(default_factory=list)
     win_rate_hist: float = 0.0
-    ai_score: float = 0.0       # Ollama AI confidence 0-1
-    kelly_pct: float = 0.0      # Kelly criterion sizing %
+    ai_score: float  = 0.0
+    kelly_pct: float = 0.0
+    volatility: float= 50.0   # 0-100
 
     def to_dict(self) -> dict:
         return {
-            "symbol":       self.symbol,
-            "broker":       self.broker,
-            "direction":    self.direction,
-            "score":        self.score,
-            "payout":       round(self.payout * 100, 1),
-            "expiration":   self.expiration,
-            "market_type":  self.market_type,
-            "category":     self.category,
-            "timestamp":    self.timestamp,
-            "reasons":      self.reasons,
+            "symbol":        self.symbol,
+            "broker":        self.broker,
+            "direction":     self.direction,
+            "score":         self.score,
+            "payout":        round(self.payout * 100, 1),
+            "expiration":    self.expiration,
+            "market_type":   self.market_type,
+            "category":      self.category,
+            "timestamp":     self.timestamp,
+            "reasons":       self.reasons,
             "win_rate_hist": round(self.win_rate_hist * 100, 1),
-            "ai_score":     round(self.ai_score * 100, 1),
-            "kelly_pct":    round(self.kelly_pct * 100, 1),
+            "ai_score":      round(self.ai_score * 100, 1),
+            "kelly_pct":     round(self.kelly_pct * 100, 1),
+            "volatility":    round(self.volatility, 1),
             "tf_results": [
                 {"tf": TF_NAMES[t.tf], "dir": t.direction,
                  "score": t.score, "chop": round(t.chop, 1),
+                 "vol": round(t.volatility, 1),
                  "reasons": t.reasons}
                 for t in self.tf_results
             ],
         }
 
 
+# ── Utilidades ─────────────────────────────────────────────
 def _to_df(candles) -> pd.DataFrame:
     if not candles:
         return pd.DataFrame()
@@ -102,151 +98,340 @@ def _to_df(candles) -> pd.DataFrame:
          for c in candles],
         columns=["time","open","high","low","close","volume"],
     ).sort_values("time").reset_index(drop=True)
-    # Eliminar velas finales planas (sin movimiento) — datos no actualizados de yfinance
+    # Quitar velas planas del final (yfinance a veces repite el último precio)
     while len(df) > 40 and df["close"].iloc[-1] == df["close"].iloc[-2]:
         df = df.iloc[:-1]
     return df
 
 
-def _analyze_tf(df: pd.DataFrame, tf: int) -> TFResult:
-    res = TFResult(tf=tf, direction=None, score=0)
-    if len(df) < 40:
+def _volatility_score(close: pd.Series, high: pd.Series, low: pd.Series) -> float:
+    """0=dormido, 50=ideal, 100=muy volátil. Basado en ATR% del precio."""
+    if len(close) < 14:
+        return 50.0
+    price = close.iloc[-1]
+    if price == 0:
+        return 50.0
+    pc  = close.shift(1)
+    tr  = pd.concat([high-low, (high-pc).abs(), (low-pc).abs()], axis=1).max(axis=1)
+    atr_val = tr.rolling(14).mean().iloc[-1]
+    atr_pct = (atr_val / price) * 100
+    # Mapear a 0-100: 0%=0, 0.05%=25, 0.15%=50, 0.4%=75, ≥0.8%=100
+    score = min(100.0, atr_pct / 0.8 * 100)
+    return round(score, 1)
+
+
+# ── M1: Estrategia de reversión rápida ────────────────────
+def _analyze_m1(df: pd.DataFrame) -> TFResult:
+    """
+    Para 1 minuto: señales de reversión en zonas extremas.
+    RSI < 25 / > 75, BB toque, patrón vela, Stoch cross en extremos.
+    """
+    res = TFResult(tf=60, direction=None, score=0)
+    if len(df) < 30:
         return res
 
     close, high, low = df["close"], df["high"], df["low"]
-    score = 0
-    calls = puts = 0
-    reasons: list[str] = []
+    res.chop       = chop_index(high, low, close).iloc[-1]
+    res.volatility = _volatility_score(close, high, low)
 
-    # ── Chop filter ──────────────────────────────────────────
-    chop = chop_index(high, low, close).iloc[-1]
-    res.chop = chop
-    if chop > MAX_CHOP:
-        res.reasons = [f"CHOP lateral {chop:.1f} > {MAX_CHOP}"]
-        return res   # no signal in choppy market
-
-    # ── Trend Streak ─────────────────────────────────────────
-    streak = trend_streak(close)
-    if abs(streak) < MIN_STREAK:
-        res.reasons = [f"Sin tendencia (streak={streak})"]
+    if res.chop > MAX_CHOP:
+        res.reasons = [f"Lateral CHOP={res.chop:.0f}"]
         return res
 
-    # ── RSI (20 pts) ─────────────────────────────────────────
-    r = rsi(close).iloc[-1]
-    if r < 30:
-        calls += 1; score += 20; reasons.append(f"RSI sobreventa {r:.1f}")
-    elif r > 70:
-        puts  += 1; score += 20; reasons.append(f"RSI sobrecompra {r:.1f}")
-    elif r < 42:
-        calls += 1; score += 10; reasons.append(f"RSI bajo {r:.1f}")
-    elif r > 58:
-        puts  += 1; score += 10; reasons.append(f"RSI alto {r:.1f}")
+    # Necesitamos algo de movimiento para M1
+    if res.volatility < 5:
+        res.reasons = ["Mercado dormido"]
+        return res
 
-    # ── MACD cross (20 pts) ──────────────────────────────────
-    m = macd(close)
-    h = m["hist"]
-    if len(h) >= 2:
-        if h.iloc[-2] < 0 < h.iloc[-1]:
-            calls += 1; score += 20; reasons.append("MACD cruce alcista")
-        elif h.iloc[-2] > 0 > h.iloc[-1]:
-            puts  += 1; score += 20; reasons.append("MACD cruce bajista")
-        elif h.iloc[-1] > 0 and h.iloc[-1] > h.iloc[-2]:
-            calls += 1; score += 10; reasons.append("MACD momentum alcista")
-        elif h.iloc[-1] < 0 and h.iloc[-1] < h.iloc[-2]:
-            puts  += 1; score += 10; reasons.append("MACD momentum bajista")
+    score, calls, puts = 0, 0, 0
+    reasons: list[str] = []
 
-    # ── Bollinger Bands (15 pts) ─────────────────────────────
-    bb = bollinger(close)
+    # RSI — zona extrema pesa más en M1
+    r = rsi(close, 7).iloc[-1]   # RSI rápido para M1
+    if r <= 20:
+        calls += 1; score += 30; reasons.append(f"RSI M1 sobreventa {r:.0f}")
+    elif r >= 80:
+        puts  += 1; score += 30; reasons.append(f"RSI M1 sobrecompra {r:.0f}")
+    elif r <= 30:
+        calls += 1; score += 18; reasons.append(f"RSI M1 bajo {r:.0f}")
+    elif r >= 70:
+        puts  += 1; score += 18; reasons.append(f"RSI M1 alto {r:.0f}")
+    elif r <= 40:
+        calls += 1; score += 8;  reasons.append(f"RSI M1 neutral-bajo {r:.0f}")
+    elif r >= 60:
+        puts  += 1; score += 8;  reasons.append(f"RSI M1 neutral-alto {r:.0f}")
+
+    # BB toque — clave en M1 para reversión
+    bb = bollinger(close, 10)   # BB rápido
     pb = bb["pct_b"].iloc[-1]
     bw = bb["bw"].iloc[-1]
-    if bw > 0.008:   # evitar señales en squeeze
-        if pb < 0.04:
-            calls += 1; score += 15; reasons.append(f"BB toque inferior %B={pb:.2f}")
-        elif pb > 0.96:
-            puts  += 1; score += 15; reasons.append(f"BB toque superior %B={pb:.2f}")
-        elif pb < 0.18:
-            calls += 1; score += 7;  reasons.append(f"BB zona baja %B={pb:.2f}")
-        elif pb > 0.82:
-            puts  += 1; score += 7;  reasons.append(f"BB zona alta %B={pb:.2f}")
+    if bw > 0.003:
+        if pb <= 0.02:
+            calls += 1; score += 28; reasons.append(f"BB M1 toque banda baja %B={pb:.2f}")
+        elif pb >= 0.98:
+            puts  += 1; score += 28; reasons.append(f"BB M1 toque banda alta %B={pb:.2f}")
+        elif pb <= 0.10:
+            calls += 1; score += 14; reasons.append(f"BB M1 zona baja %B={pb:.2f}")
+        elif pb >= 0.90:
+            puts  += 1; score += 14; reasons.append(f"BB M1 zona alta %B={pb:.2f}")
 
-    # ── EMA triple 8/21/55 (15 pts) ─────────────────────────
-    e8, e21, e55 = ema(close,8).iloc[-1], ema(close,21).iloc[-1], ema(close,55).iloc[-1]
-    price = close.iloc[-1]
-    if e8 > e21 > e55 and price > e8:
-        calls += 1; score += 15; reasons.append("EMA alcista 8>21>55")
-    elif e8 < e21 < e55 and price < e8:
-        puts  += 1; score += 15; reasons.append("EMA bajista 8<21<55")
-    elif e8 > e21:
-        calls += 1; score += 7; reasons.append("EMA8 > EMA21")
-    elif e8 < e21:
-        puts  += 1; score += 7; reasons.append("EMA8 < EMA21")
-
-    # ── ADX + DI (10 pts) ────────────────────────────────────
-    adx_d = adx(high, low, close)
-    adx_v = adx_d["adx"].iloc[-1]
-    dip, dim = adx_d["dip"].iloc[-1], adx_d["dim"].iloc[-1]
-    if adx_v > 25:
-        score += 10
-        if dip > dim:
-            calls += 1; reasons.append(f"ADX tendencia alcista {adx_v:.1f}")
-        else:
-            puts  += 1; reasons.append(f"ADX tendencia bajista {adx_v:.1f}")
-
-    # ── Stochastic (10 pts) ──────────────────────────────────
-    st = stoch(high, low, close)
+    # Stochastic — crossover en zona extrema
+    st = stoch(high, low, close, 5, 3)
     k, d_ = st["k"].iloc[-1], st["d"].iloc[-1]
-    if k < 20 and k > d_:
-        calls += 1; score += 10; reasons.append(f"Stoch sobreventa K={k:.1f}")
-    elif k > 80 and k < d_:
-        puts  += 1; score += 10; reasons.append(f"Stoch sobrecompra K={k:.1f}")
+    k_prev = st["k"].iloc[-2]
+    if k <= 20:
+        if k > k_prev:
+            calls += 1; score += 22; reasons.append(f"Stoch M1 rebote sobreventa K={k:.0f}")
+        else:
+            calls += 1; score += 12; reasons.append(f"Stoch M1 sobreventa K={k:.0f}")
+    elif k >= 80:
+        if k < k_prev:
+            puts  += 1; score += 22; reasons.append(f"Stoch M1 caída sobrecompra K={k:.0f}")
+        else:
+            puts  += 1; score += 12; reasons.append(f"Stoch M1 sobrecompra K={k:.0f}")
 
-    # ── Patrón de vela (10 pts) ──────────────────────────────
+    # Patrón de vela — muy relevante en M1
     pats = candle_patterns(df)
-    bull_pats = ["hammer","pin_bull","bull_engulf","3_white"]
-    bear_pats = ["shooting_star","pin_bear","bear_engulf","3_black"]
-    for p in bull_pats:
-        if pats.get(p):
-            calls += 1; score += 10; reasons.append(f"Patrón: {p}"); break
-    for p in bear_pats:
-        if pats.get(p):
-            puts  += 1; score += 10; reasons.append(f"Patrón: {p}"); break
+    if pats.get("pin_bull") or pats.get("hammer"):
+        calls += 1; score += 20; reasons.append("Vela: Pin Bull/Hammer M1")
+    elif pats.get("pin_bear") or pats.get("shooting_star"):
+        puts  += 1; score += 20; reasons.append("Vela: Pin Bear/Shooting Star M1")
+    elif pats.get("bull_engulf"):
+        calls += 1; score += 15; reasons.append("Vela: Engulfing alcista M1")
+    elif pats.get("bear_engulf"):
+        puts  += 1; score += 15; reasons.append("Vela: Engulfing bajista M1")
 
-    # ── Soporte/Resistencia ──────────────────────────────────
-    sr = sr_levels(close)
-    rng = (sr["resistance"] - sr["support"]) or 1e-10
-    if (price - sr["support"]) / rng < 0.05:
-        calls += 1; score += 5; reasons.append(f"Cerca soporte {sr['support']:.5f}")
-    elif (sr["resistance"] - price) / rng < 0.05:
-        puts  += 1; score += 5; reasons.append(f"Cerca resistencia {sr['resistance']:.5f}")
+    # EMA rápida 5/13
+    e5  = ema(close, 5).iloc[-1]
+    e13 = ema(close, 13).iloc[-1]
+    price = close.iloc[-1]
+    if e5 > e13 and price > e5:
+        calls += 1; score += 10; reasons.append("EMA5>EMA13 alcista")
+    elif e5 < e13 and price < e5:
+        puts  += 1; score += 10; reasons.append("EMA5<EMA13 bajista")
 
-    # ── Dirección final ──────────────────────────────────────
     if calls > puts:
         res.direction = "CALL"
     elif puts > calls:
         res.direction = "PUT"
 
-    res.score = min(score, 100)
+    res.score   = min(score, 100)
     res.reasons = reasons
     return res
 
 
+# ── M5: Estrategia de momentum ────────────────────────────
+def _analyze_m5(df: pd.DataFrame) -> TFResult:
+    """
+    Para 5 minutos: momentum confirmado con MACD + EMA + ADX.
+    """
+    res = TFResult(tf=300, direction=None, score=0)
+    if len(df) < 35:
+        return res
+
+    close, high, low = df["close"], df["high"], df["low"]
+    res.chop       = chop_index(high, low, close).iloc[-1]
+    res.volatility = _volatility_score(close, high, low)
+
+    if res.chop > MAX_CHOP:
+        res.reasons = [f"Lateral CHOP={res.chop:.0f}"]
+        return res
+
+    score, calls, puts = 0, 0, 0
+    reasons: list[str] = []
+
+    # MACD — clave en M5
+    m = macd(close, 8, 17, 9)
+    hist = m["hist"]
+    line = m["line"]
+    if len(hist) >= 3:
+        if hist.iloc[-2] <= 0 < hist.iloc[-1]:
+            calls += 1; score += 30; reasons.append("MACD M5 cruce alcista")
+        elif hist.iloc[-2] >= 0 > hist.iloc[-1]:
+            puts  += 1; score += 30; reasons.append("MACD M5 cruce bajista")
+        elif hist.iloc[-1] > 0 and hist.iloc[-1] > hist.iloc[-2] > hist.iloc[-3]:
+            calls += 1; score += 18; reasons.append("MACD M5 momentum creciente")
+        elif hist.iloc[-1] < 0 and hist.iloc[-1] < hist.iloc[-2] < hist.iloc[-3]:
+            puts  += 1; score += 18; reasons.append("MACD M5 momentum decreciente")
+        elif line.iloc[-1] > 0:
+            calls += 1; score += 8;  reasons.append("MACD M5 línea positiva")
+        elif line.iloc[-1] < 0:
+            puts  += 1; score += 8;  reasons.append("MACD M5 línea negativa")
+
+    # EMA 8/21 — alineación de tendencia
+    e8  = ema(close, 8).iloc[-1]
+    e21 = ema(close, 21).iloc[-1]
+    price = close.iloc[-1]
+    if e8 > e21 and price > e8:
+        calls += 1; score += 22; reasons.append("EMA8>EMA21 M5 precio arriba")
+    elif e8 < e21 and price < e8:
+        puts  += 1; score += 22; reasons.append("EMA8<EMA21 M5 precio abajo")
+    elif e8 > e21:
+        calls += 1; score += 10; reasons.append("EMA8>EMA21 M5")
+    elif e8 < e21:
+        puts  += 1; score += 10; reasons.append("EMA8<EMA21 M5")
+
+    # ADX — fuerza de tendencia
+    adx_d = adx(high, low, close, 14)
+    adx_v = adx_d["adx"].iloc[-1]
+    dip, dim = adx_d["dip"].iloc[-1], adx_d["dim"].iloc[-1]
+    if adx_v >= 20:
+        bonus = 25 if adx_v >= 30 else 15
+        score += bonus
+        if dip > dim:
+            calls += 1; reasons.append(f"ADX M5 tendencia alcista {adx_v:.0f}")
+        else:
+            puts  += 1; reasons.append(f"ADX M5 tendencia bajista {adx_v:.0f}")
+
+    # RSI confirmación
+    r = rsi(close, 14).iloc[-1]
+    if r < 40:
+        calls += 1; score += 12; reasons.append(f"RSI M5 bajo {r:.0f}")
+    elif r > 60:
+        puts  += 1; score += 12; reasons.append(f"RSI M5 alto {r:.0f}")
+
+    # Stoch
+    st = stoch(high, low, close, 14, 3)
+    k = st["k"].iloc[-1]
+    if k < 30 and k > st["k"].iloc[-2]:
+        calls += 1; score += 11; reasons.append(f"Stoch M5 rebote {k:.0f}")
+    elif k > 70 and k < st["k"].iloc[-2]:
+        puts  += 1; score += 11; reasons.append(f"Stoch M5 caída {k:.0f}")
+
+    if calls > puts:
+        res.direction = "CALL"
+    elif puts > calls:
+        res.direction = "PUT"
+
+    res.score   = min(score, 100)
+    res.reasons = reasons
+    return res
+
+
+# ── M15: Estrategia de tendencia ──────────────────────────
+def _analyze_m15(df: pd.DataFrame) -> TFResult:
+    """
+    Para 15 minutos: confirmar tendencia con EMA triple + ADX fuerte + S/R.
+    """
+    res = TFResult(tf=900, direction=None, score=0)
+    if len(df) < 40:
+        return res
+
+    close, high, low = df["close"], df["high"], df["low"]
+    res.chop       = chop_index(high, low, close).iloc[-1]
+    res.volatility = _volatility_score(close, high, low)
+
+    if res.chop > MAX_CHOP:
+        res.reasons = [f"Lateral CHOP={res.chop:.0f}"]
+        return res
+
+    score, calls, puts = 0, 0, 0
+    reasons: list[str] = []
+
+    # EMA triple 8/21/55 — alineación perfecta
+    e8  = ema(close, 8).iloc[-1]
+    e21 = ema(close, 21).iloc[-1]
+    e55 = ema(close, 55).iloc[-1]
+    price = close.iloc[-1]
+    if e8 > e21 > e55 and price > e8:
+        calls += 1; score += 35; reasons.append("EMA 8>21>55 M15 alineación alcista perfecta")
+    elif e8 < e21 < e55 and price < e8:
+        puts  += 1; score += 35; reasons.append("EMA 8<21<55 M15 alineación bajista perfecta")
+    elif e8 > e21 > e55:
+        calls += 1; score += 20; reasons.append("EMA M15 alcista 8>21>55")
+    elif e8 < e21 < e55:
+        puts  += 1; score += 20; reasons.append("EMA M15 bajista 8<21<55")
+    elif e8 > e21:
+        calls += 1; score += 10; reasons.append("EMA M15 8>21")
+    elif e8 < e21:
+        puts  += 1; score += 10; reasons.append("EMA M15 8<21")
+
+    # ADX — filtro de tendencia fuerte
+    adx_d = adx(high, low, close, 14)
+    adx_v = adx_d["adx"].iloc[-1]
+    dip, dim = adx_d["dip"].iloc[-1], adx_d["dim"].iloc[-1]
+    if adx_v >= 25:
+        bonus = 30 if adx_v >= 35 else 18
+        score += bonus
+        if dip > dim:
+            calls += 1; reasons.append(f"ADX M15 {adx_v:.0f} DI+ domina")
+        else:
+            puts  += 1; reasons.append(f"ADX M15 {adx_v:.0f} DI- domina")
+    elif adx_v >= 18:
+        score += 8
+        if dip > dim:
+            calls += 1; reasons.append(f"ADX M15 tendencia media {adx_v:.0f}")
+        else:
+            puts  += 1; reasons.append(f"ADX M15 tendencia media {adx_v:.0f}")
+
+    # MACD — dirección macro
+    m = macd(close, 12, 26, 9)
+    hist = m["hist"]
+    if len(hist) >= 2:
+        if hist.iloc[-1] > 0 and hist.iloc[-1] >= hist.iloc[-2]:
+            calls += 1; score += 18; reasons.append("MACD M15 histograma positivo y creciendo")
+        elif hist.iloc[-1] < 0 and hist.iloc[-1] <= hist.iloc[-2]:
+            puts  += 1; score += 18; reasons.append("MACD M15 histograma negativo y cayendo")
+        elif hist.iloc[-1] > 0:
+            calls += 1; score += 8;  reasons.append("MACD M15 positivo")
+        elif hist.iloc[-1] < 0:
+            puts  += 1; score += 8;  reasons.append("MACD M15 negativo")
+
+    # RSI tendencia
+    r = rsi(close, 14).iloc[-1]
+    if 40 <= r <= 55:
+        # RSI en zona sana para tendencia alcista
+        calls += 1; score += 8; reasons.append(f"RSI M15 zona alcista sana {r:.0f}")
+    elif 45 <= r <= 60:
+        puts  += 1; score += 8; reasons.append(f"RSI M15 zona bajista sana {r:.0f}")
+    elif r < 35:
+        calls += 1; score += 15; reasons.append(f"RSI M15 bajo {r:.0f}")
+    elif r > 65:
+        puts  += 1; score += 15; reasons.append(f"RSI M15 alto {r:.0f}")
+
+    # Soporte / Resistencia
+    sr = sr_levels(close)
+    rng = (sr["resistance"] - sr["support"]) or 1e-10
+    if (price - sr["support"]) / rng < 0.08:
+        calls += 1; score += 10; reasons.append(f"S/R M15 cerca soporte")
+    elif (sr["resistance"] - price) / rng < 0.08:
+        puts  += 1; score += 10; reasons.append(f"S/R M15 cerca resistencia")
+
+    if calls > puts:
+        res.direction = "CALL"
+    elif puts > calls:
+        res.direction = "PUT"
+
+    res.score   = min(score, 100)
+    res.reasons = reasons
+    return res
+
+
+# ── Análisis por TF (dispatcher) ──────────────────────────
+def _analyze_tf(df: pd.DataFrame, tf: int) -> TFResult:
+    if tf == 60:   return _analyze_m1(df)
+    if tf == 300:  return _analyze_m5(df)
+    if tf == 900:  return _analyze_m15(df)
+    return TFResult(tf=tf, direction=None, score=0)
+
+
+# ── Kelly Criterion ────────────────────────────────────────
 def kelly_criterion(win_rate: float, payout: float) -> float:
-    """Kelly fraction = (p*b - q) / b  donde b = payout, p = win_rate."""
     if win_rate <= 0 or payout <= 0:
         return 0.0
     q = 1.0 - win_rate
-    b = payout
-    kelly = (win_rate * b - q) / b
-    return max(0.0, min(kelly * 0.5, 0.15))  # medio Kelly, tope 15%
+    kelly = (win_rate * payout - q) / payout
+    return max(0.0, min(kelly * 0.5, 0.15))
 
 
+# ── Análisis principal ─────────────────────────────────────
 def analyze(
     candles_by_tf: dict[int, list],
     symbol: str,
     broker: str,
     payout: float,
     market_type: str = "REAL",
-    category: str = "forex",
+    category: str   = "Forex",
     win_rate_hist: float = 0.0,
 ) -> Signal | None:
 
@@ -258,7 +443,7 @@ def analyze(
         df = _to_df(candles_by_tf.get(tf, []))
         tf_results.append(_analyze_tf(df, tf))
 
-    # Mayoría de TF deben coincidir (2 de 3)
+    # Mayoría de TF deben coincidir
     dirs = [r.direction for r in tf_results if r.direction is not None]
     if len(dirs) < MIN_TF_AGREE:
         return None
@@ -269,25 +454,30 @@ def analyze(
 
     direction: Direction = "CALL" if calls >= puts else "PUT"
 
-    # Score ponderado solo de TFs que coinciden
+    # Score compuesto ponderado de los TF que coinciden
+    matching = [r for r in tf_results if r.direction == direction]
     composite = int(min(
-        sum(r.score * WEIGHTS[r.tf] for r in tf_results if r.direction == direction),
+        sum(r.score * WEIGHTS[r.tf] for r in matching) /
+        sum(WEIGHTS[r.tf] for r in matching),
         100
     ))
 
     if composite < MIN_COMPOSITE:
         return None
 
-    # Razones agregadas sin duplicar
-    all_reasons: list[str] = []
-    for r in tf_results:
-        if r.direction == direction:
-            for reason in r.reasons:
-                tag = f"[{TF_NAMES[r.tf]}] {reason}"
-                if tag not in all_reasons:
-                    all_reasons.append(tag)
+    # Volatilidad promedio
+    avg_vol = sum(r.volatility for r in tf_results) / len(tf_results)
 
-    exp_tf = min(r.tf for r in tf_results if r.direction == direction)
+    # Razones sin duplicar
+    all_reasons: list[str] = []
+    for r in matching:
+        for reason in r.reasons:
+            tag = f"[{TF_NAMES[r.tf]}] {reason}"
+            if tag not in all_reasons:
+                all_reasons.append(tag)
+
+    # Expiración = TF más corto que coincide
+    exp_tf = min(r.tf for r in matching)
     kelly  = kelly_criterion(win_rate_hist, payout)
 
     return Signal(
@@ -297,4 +487,5 @@ def analyze(
         market_type=market_type, category=category,
         reasons=all_reasons, tf_results=tf_results,
         win_rate_hist=win_rate_hist, kelly_pct=kelly,
+        volatility=avg_vol,
     )

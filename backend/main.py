@@ -96,61 +96,83 @@ async def broadcast(msg: dict):
 
 
 # ── Scanner loop ───────────────────────────────────────────
+async def _fetch_asset(broker, asset, mt: str) -> None:
+    """Analiza un activo individual — descarga los 3 TF en PARALELO."""
+    try:
+        # Descargar M1, M5, M15 simultáneamente
+        results = await asyncio.gather(
+            broker.get_candles(asset.symbol, 60,  150),
+            broker.get_candles(asset.symbol, 300, 150),
+            broker.get_candles(asset.symbol, 900, 150),
+            return_exceptions=True,
+        )
+        candles_by_tf = {
+            60:  results[0] if not isinstance(results[0], Exception) else [],
+            300: results[1] if not isinstance(results[1], Exception) else [],
+            900: results[2] if not isinstance(results[2], Exception) else [],
+        }
+
+        wr  = win_rate(asset.symbol, None)
+        sig = analyze(candles_by_tf, asset.symbol, broker.name,
+                      asset.payout, mt, asset.category, wr)
+        if sig is None:
+            return
+
+        ok, reason = S.reviewer.review(sig)
+        if not ok:
+            log.debug(f"Rejected {asset.symbol}: {reason}"); return
+
+        # ── Ollama AI validation ────────────────────────
+        if cfg.OLLAMA_ENABLED and S.ollama_active:
+            ai_prob = await ai_validate(sig, cfg.OLLAMA_MODEL)
+            sig.ai_score = ai_prob
+            if ai_prob < cfg.OLLAMA_MIN_SCORE:
+                log.info(f"[AI] {asset.symbol} rechazado AI={ai_prob:.0%}"); return
+        else:
+            sig.ai_score = 0.0
+
+        sig.win_rate_hist = wr
+        sid = save_sig(sig)
+        d   = sig.to_dict(); d["id"] = sid
+        S.signals.insert(0, d); S.signals = S.signals[:100]
+
+        log.info(f"✅ {sig.direction} {asset.symbol} [{mt}] "
+                 f"score={sig.score} AI={sig.ai_score:.0%} vol={sig.volatility:.0f}%")
+
+        await broadcast({"type": "signal", "data": d})
+        await tg_send(sig)
+
+    except Exception as e:
+        log.warning(f"{asset.symbol}: {e}")
+
+
 async def scan_once():
+    from brokers.demo import TOP5_REAL, TOP5_OTC
     broker = S.brokers.get(S.active_broker)
     if not broker or not broker.is_ready():
         return
     mt = S.market_type
     try:
-        assets = await broker.get_assets(market_type=mt)
+        all_assets = await broker.get_assets(market_type=mt)
     except Exception as e:
-        log.warning(f"get_assets failed: {e}"); return
+        log.warning(f"get_assets: {e}"); return
 
     filter_syms = set(cfg.ASSETS)
-    assets = [a for a in assets
-              if (not filter_syms or a.symbol in filter_syms)
-              and a.payout >= cfg.MIN_PAYOUT_PCT / 100]
+    all_assets  = [a for a in all_assets
+                   if (not filter_syms or a.symbol in filter_syms)
+                   and a.payout >= cfg.MIN_PAYOUT_PCT / 100]
 
-    for asset in assets:
-        try:
-            candles_by_tf: dict[int, list] = {}
-            for tf in [60, 300, 900]:
-                candles_by_tf[tf] = await broker.get_candles(asset.symbol, tf, 150)
-                await asyncio.sleep(0.1)
+    # SOLO los 5 pares más operados en BO — nada más
+    top5 = TOP5_OTC if mt == "OTC" else TOP5_REAL
+    ordered = [a for a in all_assets if a.symbol in top5]
 
-            wr = win_rate(asset.symbol, None)
-            sig = analyze(candles_by_tf, asset.symbol, broker.name,
-                          asset.payout, mt, asset.category, wr)
-            if sig is None:
-                continue
+    log.info(f"Escaneando Top5 [{mt}]: {[a.symbol for a in ordered]}")
 
-            ok, reason = S.reviewer.review(sig)
-            if not ok:
-                log.debug(f"Rejected {asset.symbol}: {reason}"); continue
-
-            # ── Ollama AI validation ────────────────────────
-            if cfg.OLLAMA_ENABLED and S.ollama_active:
-                ai_prob = await ai_validate(sig, cfg.OLLAMA_MODEL)
-                sig.ai_score = ai_prob
-                if ai_prob < cfg.OLLAMA_MIN_SCORE:
-                    log.info(f"[AI] {asset.symbol} rechazado AI={ai_prob:.0%}"); continue
-            else:
-                sig.ai_score = 0.0
-
-            # ── Emit ────────────────────────────────────────
-            sig.win_rate_hist = wr
-            sid = save_sig(sig)
-            d = sig.to_dict(); d["id"] = sid
-            S.signals.insert(0, d); S.signals = S.signals[:100]
-
-            log.info(f"✅ {sig.direction} {asset.symbol} [{mt}] "
-                     f"score={sig.score} AI={sig.ai_score:.0%} payout={asset.payout*100:.0f}%")
-
-            await broadcast({"type": "signal", "data": d})
-            await tg_send(sig)
-
-        except Exception as e:
-            log.warning(f"{asset.symbol}: {e}")
+    # Descarga los 5 en paralelo (M1+M5+M15 de cada uno simultáneamente)
+    batch_size = 5
+    for i in range(0, len(ordered), batch_size):
+        batch = ordered[i:i+batch_size]
+        await asyncio.gather(*[_fetch_asset(broker, a, mt) for a in batch])
 
 
 async def scanner_loop():
@@ -158,8 +180,8 @@ async def scanner_loop():
     while S.scanning:
         broker = S.brokers.get(S.active_broker)
         if broker and broker.is_ready():
-            log.info(f"🔍 {broker.name} [{S.market_type}]…")
-            await broadcast({"type":"scan_start","ts":time.time(),"broker":broker.name,"market":S.market_type})
+            await broadcast({"type":"scan_start","ts":time.time(),
+                             "broker":broker.name,"market":S.market_type})
             await scan_once()
             await broadcast({"type":"scan_done","ts":time.time()})
         await asyncio.sleep(cfg.SCAN_INTERVAL)
