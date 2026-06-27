@@ -162,9 +162,25 @@ async def _fetch_asset(broker, asset, mt: str) -> None:
         log.warning(f"{asset.symbol}: {e}")
 
 
-async def _scan_market(broker, mt: str):
-    """Escanea los 5 pares en un mercado (REAL u OTC)."""
+def _broker_for(mt: str):
+    """
+    Elige el broker correcto según el mercado:
+    - OTC: prefiere IQ/Exnova (datos 24/7 del broker); si no está, usa demo
+    - REAL: usa el broker activo (normalmente demo/yfinance)
+    """
+    if mt == "OTC":
+        iq = S.brokers.get("iqoption")
+        if iq and iq.is_ready():
+            return iq
+    return S.brokers.get(S.active_broker)
+
+
+async def _scan_market(mt: str):
+    """Escanea los 4 pares en un mercado (REAL u OTC)."""
     from brokers.demo import TOP5_REAL, TOP5_OTC
+    broker = _broker_for(mt)
+    if not broker or not broker.is_ready():
+        log.debug(f"[{mt}] sin broker disponible"); return
     try:
         all_assets = await broker.get_assets(market_type=mt)
     except Exception as e:
@@ -175,28 +191,25 @@ async def _scan_market(broker, mt: str):
                if a.symbol in top5
                and a.payout >= cfg.MIN_PAYOUT_PCT / 100]
 
-    log.info(f"Escaneando [{mt}]: {[a.symbol for a in ordered]}")
+    log.info(f"Escaneando [{mt}] via {broker.name}: {[a.symbol for a in ordered]}")
     await asyncio.gather(*[_fetch_asset(broker, a, mt) for a in ordered])
 
 
 async def scan_once():
     """Escanea REAL y OTC en paralelo — siempre los dos mercados."""
-    broker = S.brokers.get(S.active_broker)
-    if not broker or not broker.is_ready():
-        return
     await asyncio.gather(
-        _scan_market(broker, "REAL"),
-        _scan_market(broker, "OTC"),
+        _scan_market("REAL"),
+        _scan_market("OTC"),
     )
 
 
 async def scanner_loop():
     S.scanning = True
     while S.scanning:
-        broker = S.brokers.get(S.active_broker)
-        if broker and broker.is_ready():
+        any_ready = any(b.is_ready() for b in S.brokers.values())
+        if any_ready:
             await broadcast({"type":"scan_start","ts":time.time(),
-                             "broker":broker.name,"market":"REAL+OTC"})
+                             "broker":S.active_broker,"market":"REAL+OTC"})
             await scan_once()
             await broadcast({"type":"scan_done","ts":time.time()})
         await asyncio.sleep(cfg.SCAN_INTERVAL)
@@ -211,15 +224,15 @@ async def index():
 @app.post("/api/scan")
 async def api_scan():
     """Dispara un escaneo completo y espera el resultado antes de responder."""
-    broker = S.brokers.get(S.active_broker)
-    if not broker or not broker.is_ready():
-        return JSONResponse({"error": "broker no disponible"}, status_code=503)
+    any_ready = any(b.is_ready() for b in S.brokers.values())
+    if not any_ready:
+        return JSONResponse({"error": "ningún broker disponible"}, status_code=503)
     before = len(S.signals)
-    await broadcast({"type":"scan_start","ts":time.time(),"broker":broker.name,"market":S.market_type})
+    await broadcast({"type":"scan_start","ts":time.time(),"broker":S.active_broker,"market":"REAL+OTC"})
     await scan_once()
     await broadcast({"type":"scan_done","ts":time.time()})
     new_count = len(S.signals) - before
-    return {"ok": True, "broker": S.active_broker, "market": S.market_type,
+    return {"ok": True, "broker": S.active_broker, "market": "REAL+OTC",
             "new_signals": max(0, new_count)}
 
 
