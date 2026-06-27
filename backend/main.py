@@ -295,41 +295,43 @@ async def api_config(body: dict):
 async def api_outcome(body: dict):
     sid     = body.get("id")
     outcome = body.get("outcome","").upper()
-    if not sid or outcome not in ("WIN","LOSS"):
+    if sid is None or outcome not in ("WIN","LOSS"):
         return JSONResponse({"error":"Need id and outcome"},status_code=400)
-    mark_sig(sid, outcome)
+
+    # Normalizar id para comparar correctamente (JSON envía int o string)
+    try:    sid_int = int(sid)
+    except: sid_int = None
+
+    mark_sig(sid_int or sid, outcome)
+
     # Buscar señal en memoria y actualizar
     sig_dict = None
     for s in S.signals:
-        if s.get("id") == sid:
+        s_id = s.get("id")
+        if s_id == sid or (sid_int is not None and s_id == sid_int):
             s["outcome"] = outcome
-            # Escalar martingale si perdió
             if outcome == "LOSS":
                 prev_mg = s.get("mg_level", 0)
                 if prev_mg < 3:
                     s["mg_level"] = prev_mg + 1
-                    sig_dict = s
+                    sig_dict = dict(s)   # copia para no mutar en el broadcast
             break
-    await broadcast({"type":"outcome","id":sid,"outcome":outcome})
-    # Enviar alerta martingale por Telegram si aplica
+
+    await broadcast({"type":"outcome","id":sid_int or sid,"outcome":outcome})
+
+    # Emitir señal martingale a la UI si aplica
     if sig_dict:
-        from dataclasses import SimpleNamespace
-        fake = SimpleNamespace(**{
-            "symbol":   sig_dict.get("symbol",""),
-            "direction":sig_dict.get("direction","CALL"),
-            "expiration":sig_dict.get("expiration",1),
-            "payout":   sig_dict.get("payout",80)/100,
-            "ai_score": sig_dict.get("ai_score",0)/100,
-            "kelly_pct":sig_dict.get("kelly_pct",0)/100,
-            "win_rate_hist": sig_dict.get("win_rate_hist",0)/100,
-        })
-        asyncio.create_task(tg_martingale(fake, sig_dict["mg_level"]))
-        # Emitir señal martingale a la UI
         mg_sig = dict(sig_dict)
-        mg_sig["id"] = None
-        mg_sig["mg_level"] = sig_dict["mg_level"]
+        mg_sig["id"] = f"mg_{int(time.time())}"
         mg_sig["outcome"] = None
+        # Generar entrada para la siguiente vela del mismo TF
+        exp_tf   = (sig_dict.get("expiration",1) or 1) * 60
+        now      = time.time()
+        entry_t  = int(now // exp_tf) * exp_tf + exp_tf
+        mg_sig["entry_time"]  = entry_t
+        mg_sig["expiry_time"] = entry_t + exp_tf
         await broadcast({"type":"martingale","data":mg_sig,"level":sig_dict["mg_level"]})
+
     return {"ok":True}
 
 

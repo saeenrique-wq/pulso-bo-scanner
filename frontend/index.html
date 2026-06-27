@@ -302,6 +302,43 @@ body{display:flex;flex-direction:column;}
 .btn-danger.confirm-mode{background:rgba(255,45,85,.25);border-color:rgba(255,45,85,.6);
   animation:pulse-entry .5s infinite alternate;}
 
+/* ── CONFIANZA ────────────────────────────────────────────── */
+.conf-bar{display:flex;align-items:center;gap:5px;margin-top:4px;}
+.conf-dots{display:flex;gap:3px;}
+.conf-dot{width:8px;height:8px;border-radius:50%;border:1.5px solid;transition:all .2s;}
+.conf-dot.on{border-color:transparent;}
+.conf-lbl{font-size:.58rem;font-weight:800;letter-spacing:.4px;}
+
+/* ── RAZÓN SIMPLE ─────────────────────────────────────────── */
+.sc-reason{padding:8px 12px;font-size:.76rem;color:var(--t);line-height:1.5;
+  border-top:1px solid rgba(255,255,255,.05);}
+.sc-reason b{color:var(--gold);}
+
+/* ── MARTINGALE BANNER ────────────────────────────────────── */
+.mg-banner{padding:9px 14px;font-size:.74rem;font-weight:800;display:flex;
+  align-items:center;gap:7px;letter-spacing:.2px;}
+.mg-banner.m1{background:rgba(255,140,0,.15);border-bottom:1px solid rgba(255,140,0,.3);color:#ffb347;}
+.mg-banner.m2{background:rgba(255,80,0,.18);border-bottom:1px solid rgba(255,80,0,.35);color:#ff7043;}
+.mg-banner.m3{background:rgba(255,45,85,.2);border-bottom:1px solid rgba(255,45,85,.4);color:var(--r);}
+.mg-mult{font-size:1.1rem;font-weight:900;}
+
+/* ── EFECTIVIDAD FILTER ───────────────────────────────────── */
+.eff-row{display:flex;gap:5px;padding:0 14px 8px;overflow-x:auto;scrollbar-width:none;flex-shrink:0;}
+.eff-row::-webkit-scrollbar{display:none;}
+.eff-chip{flex-shrink:0;padding:5px 12px;border-radius:99px;border:1.5px solid var(--b);
+  background:var(--card);color:var(--t2);font-size:.68rem;font-weight:600;
+  cursor:pointer;transition:all .18s;user-select:none;}
+.eff-chip.on{background:rgba(0,229,255,.1);border-color:rgba(0,229,255,.4);color:var(--cyan);}
+
+/* ── BOTTOM INFO ─────────────────────────────────────────── */
+.bot-info{display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex:1;}
+.bot-tag{font-size:.64rem;color:var(--t2);}
+.bot-tag b{color:var(--t);font-weight:700;}
+.bot-tag.kelly b{color:var(--orange);}
+
+/* ── HISTORIAL ITEM mejorado ────────────────────────────────  */
+.hi-time{font-size:.6rem;color:var(--t3);margin-left:4px;}
+
 /* ── SECTION HEADER ──────────────────────────────────────── */
 .sh{display:flex;align-items:center;justify-content:space-between;padding:6px 14px 4px;}
 .sh-t{font-size:.77rem;font-weight:700;}
@@ -358,6 +395,13 @@ body{display:flex;flex-direction:column;}
   <span class="chip on" data-mkt="all"  onclick="setMkt(this)">Todas</span>
   <span class="chip"    data-mkt="REAL" onclick="setMkt(this)">🌐 Real</span>
   <span class="chip"    data-mkt="OTC"  onclick="setMkt(this)">🕐 OTC Digital</span>
+</div>
+
+<!-- FILTRO EFECTIVIDAD -->
+<div class="eff-row" id="effrow">
+  <span class="eff-chip on" data-eff="0"   onclick="setEff(this)">Todas</span>
+  <span class="eff-chip"    data-eff="50"  onclick="setEff(this)">⚡ Efectivas +50</span>
+  <span class="eff-chip"    data-eff="70"  onclick="setEff(this)">🔥 Solo Fuertes +70</span>
 </div>
 
 <!-- SCAN BAR -->
@@ -463,7 +507,7 @@ const API = location.origin;
 const WS  = (location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/ws';
 
 // ── Estado global ──────────────────────────────────────────
-let ws, sigs=[], brokers=[], broker='demo', mkt='REAL', mktFilter='all';
+let ws, sigs=[], brokers=[], broker='demo', mkt='REAL', mktFilter='all', effFilter=0;
 let newCnt=0, notifOn=false, ollamaOn=false, scanning=false;
 
 // ── WebSocket ──────────────────────────────────────────────
@@ -597,7 +641,7 @@ async function setBroker(id){
   }catch(e){}
 }
 
-// ── Filtro REAL / OTC / Forex / Crypto ─────────────────────
+// ── Filtros ────────────────────────────────────────────────
 function setMkt(el){
   document.querySelectorAll('#catrow .chip').forEach(c=>c.classList.remove('on'));
   el.classList.add('on');
@@ -605,24 +649,71 @@ function setMkt(el){
   render();
 }
 
+function setEff(el){
+  document.querySelectorAll('#effrow .eff-chip').forEach(c=>c.classList.remove('on'));
+  el.classList.add('on');
+  effFilter = parseInt(el.dataset.eff)||0;
+  render();
+}
+
+// ── Nivel de confianza visual ──────────────────────────────
+function confLevel(score){
+  if(score>=80) return {label:'MUY ALTA', n:5, col:'var(--gold)'};
+  if(score>=65) return {label:'ALTA',     n:4, col:'var(--g)'};
+  if(score>=50) return {label:'MEDIA',    n:3, col:'var(--blue)'};
+  if(score>=35) return {label:'BAJA',     n:2, col:'var(--orange)'};
+  return             {label:'MUY BAJA',   n:1, col:'var(--r)'};
+}
+
+// ── Razón simple para no expertos ─────────────────────────
+function simpleReason(reasons, score){
+  const raw = (reasons||[]).join(' ');
+  if(/Morning Star|Estrella/i.test(raw))    return '⭐ Patrón de estrella: reversión muy probable hacia <b>ARRIBA</b>';
+  if(/Evening Star/i.test(raw))              return '⭐ Patrón de estrella: reversión muy probable hacia <b>ABAJO</b>';
+  if(/Engulfing Alcista/i.test(raw))         return '🕯 Vela envolvente: los compradores tomaron el control';
+  if(/Engulfing Bajista/i.test(raw))         return '🕯 Vela envolvente: los vendedores tomaron el control';
+  if(/3 Soldados/i.test(raw))                return '📈 3 velas alcistas seguidas: tendencia fuerte arriba';
+  if(/3 Cuervos/i.test(raw))                 return '📉 3 velas bajistas seguidas: tendencia fuerte abajo';
+  if(/Hammer/i.test(raw))                    return '🔨 Martillo: rechazo del precio hacia abajo, posible subida';
+  if(/Shooting Star/i.test(raw))             return '🌠 Estrella fugaz: rechazo hacia arriba, posible bajada';
+  if(/Pin Bar/i.test(raw))                   return '📌 Pin Bar: el precio rechazó un nivel clave fuertemente';
+  if(/Marubozu/i.test(raw))                  return '💪 Vela fuerte sin mechas: momentum puro de mercado';
+  if(/Pullback.*EMA|EMA.*rebote/i.test(raw)) return '↩️ Retroceso a zona clave + rebote confirmado';
+  if(/Soporte/i.test(raw))                   return '🛡 Precio en zona de soporte: alta probabilidad de subida';
+  if(/Resistencia/i.test(raw))               return '🧱 Precio en resistencia: alta probabilidad de bajada';
+  if(/MACD.*alcista|alcista.*MACD/i.test(raw)) return '📊 Cruce de momentum: señal de compra técnica';
+  if(/MACD.*bajista|bajista.*MACD/i.test(raw)) return '📊 Cruce de momentum: señal de venta técnica';
+  if(score>=70) return '✅ Múltiples indicadores alineados — señal de alta confianza';
+  if(score>=50) return '📊 Indicadores técnicos con señal de entrada válida';
+  return '📡 Señal detectada por el scanner automático';
+}
+
 // ── Render señales ─────────────────────────────────────────
 function render(){
-  const filtered = sigs.filter(s=>{
-    if(mktFilter==='all')  return true;
-    if(mktFilter==='REAL') return (s.market_type||'').toUpperCase()==='REAL';
-    if(mktFilter==='OTC')  return (s.market_type||'').toUpperCase()==='OTC';
+  let filtered = sigs.filter(s=>{
+    const mt = (s.market_type||'').toUpperCase();
+    if(mktFilter==='REAL' && mt!=='REAL') return false;
+    if(mktFilter==='OTC'  && mt!=='OTC')  return false;
+    if(effFilter > 0 && (s.score||0) < effFilter) return false;
     return true;
   });
+  // Ordenar por efectividad: MG primero, luego por score desc
+  filtered.sort((a,b)=>{
+    const mga=(a.mg_level||0), mgb=(b.mg_level||0);
+    if(mga!==mgb) return mgb-mga;
+    return (b.score||0)-(a.score||0);
+  });
+
   const cnt = filtered.length;
-  document.getElementById('sigcount').textContent=
-    cnt+' señal'+(cnt!==1?'es':'');
+  document.getElementById('sigcount').textContent = cnt+' señal'+(cnt!==1?'es':'');
 
   const list=document.getElementById('slist');
   if(!cnt){
+    const effMsg = effFilter>0 ? ` con +${effFilter} de efectividad` : '';
     list.innerHTML=`<div style="grid-column:1/-1"><div class="empty">
       <div class="empty-ico">📡</div>
-      <div class="empty-t">Sin señales${cat!=='all'?' en '+cat:''}</div>
-      <div class="empty-s">${mkt==='OTC'?'OTC disponible 24/7':'Mercado Lun–Vie 06-22 UTC'}<br>
+      <div class="empty-t">Sin señales${effMsg}</div>
+      <div class="empty-s">${mktFilter==='OTC'?'OTC disponible 24/7':'Mercado Lun–Vie 06-22 UTC'}<br>
       Toca 🔍 para escanear ahora mismo.</div>
     </div></div>`;
     return;
@@ -651,63 +742,93 @@ function timerState(entry_time){
 
 function sigCard(s){
   const mt  = (s.market_type||'REAL').toUpperCase();
-  const tfs = (s.tf_results||[]).map(t=>{
-    const dir=t.dir||'NONE', arrow=dir==='CALL'?'▲':dir==='PUT'?'▼':'—';
-    return `<div class="hc ${dir}">
-      <div class="tf">${t.tf}</div>
-      <div class="arrow">${arrow}</div>
-    </div>`;
-  }).join('');
+  const isMG = (s.mg_level||0) > 0;
+  const mgLv = s.mg_level||0;
+  const mgMult = ['','×2','×4','×8'][mgLv]||'';
 
-  const reasons=(s.reasons||[]).slice(0,4).map(r=>
-    `<span class="rtag">${r.replace(/\[M\d+\]\s*/,'')}</span>`).join('');
+  // ── Confianza ──────────────────────────────────────────────
+  const sc   = s.score||0;
+  const conf = confLevel(sc);
+  const dots = Array.from({length:5},(_,i)=>`
+    <div class="conf-dot${i<conf.n?' on':''}" style="
+      background:${i<conf.n?conf.col:'transparent'};
+      border-color:${i<conf.n?conf.col:'rgba(255,255,255,.15)'};
+    "></div>`).join('');
 
-  const ai = s.ai_score>0 ? `<span class="ai-inline">IA ${s.ai_score}%</span>` : '';
-
-  // Timer de entrada
+  // ── Timer ──────────────────────────────────────────────────
   const ts = s.entry_time ? timerState(s.entry_time) : null;
-  const entryHtml = s.entry_time ? `
-    <div class="entry-box ${ts.cls}" id="etb-${s.id}" data-entry="${s.entry_time}" data-expiry="${s.expiry_time}">
-      <div class="entry-label">ENTRA A LAS</div>
-      <div class="entry-time">${fmtTime(s.entry_time)}</div>
-      <div class="entry-countdown" id="ecd-${s.id}">${ts.label}</div>
-      <div class="entry-expiry">Expira ${fmtTime(s.expiry_time)}</div>
+  const hasTimer = s.entry_time && s.entry_time > 0;
+  const entryHtml = hasTimer ? `
+    <div class="entry-box ${ts&&ts.cls||'timer-ok'}" id="etb-${s.id}" data-entry="${s.entry_time}" data-expiry="${s.expiry_time||0}" style="flex-direction:column;gap:4px;">
+      <div style="display:flex;align-items:center;gap:12px;width:100%">
+        <div style="flex:1">
+          <div class="entry-label">ENTRA A LAS</div>
+          <div class="entry-time">${fmtTime(s.entry_time)}</div>
+        </div>
+        <div class="entry-countdown" id="ecd-${s.id}">${ts?ts.label:'—'}</div>
+      </div>
+      ${s.expiry_time?`<div class="entry-expiry">Expira ${fmtTime(s.expiry_time)} · duración ${s.expiration||1} min</div>`:''}
     </div>` : '';
 
+  // ── Razón simple ───────────────────────────────────────────
+  const reasonTxt = simpleReason(s.reasons, sc);
+
+  // ── Payout / Kelly ─────────────────────────────────────────
+  const wr   = s.win_rate_hist||0;
+  const kelly= s.kelly_pct||0;
+  const ai   = s.ai_score||0;
+  const botInfo = `
+    <div class="bot-info">
+      <span class="bot-tag">Ganancia: <b>${s.payout||0}%</b></span>
+      ${kelly>0?`<span class="bot-tag kelly">Apostar: <b>${kelly}% capital</b></span>`:''}
+      ${ai>0?`<span class="bot-tag" style="color:#d8b4fe">IA: <b>${ai}%</b></span>`:''}
+      ${wr>0?`<span class="bot-tag">Hist: <b style="color:${wr>=60?'var(--g)':'var(--orange)'}">${Math.round(wr)}%</b></span>`:''}
+    </div>`;
+
+  // ── Resultado ──────────────────────────────────────────────
   const outcomeHtml = s.outcome
-    ? `<div class="outcome-badge ${s.outcome}">${s.outcome==='WIN'?'✅ WIN':'❌ LOSS'}</div>`
+    ? `<div class="outcome-badge ${s.outcome}">${s.outcome==='WIN'?'✅ GANADA':'❌ PERDIDA'}</div>`
     : `<div class="outcomes">
-        <button class="btn-w" onclick="markOut('${s.id}','WIN',event)">✅ WIN</button>
-        <button class="btn-l" onclick="markOut('${s.id}','LOSS',event)">❌ LOSS</button>
+        <button class="btn-w" onclick="markOut('${s.id}','WIN',event)">✅ Gané</button>
+        <button class="btn-l" onclick="markOut('${s.id}','LOSS',event)">❌ Perdí</button>
        </div>`;
 
   return `<div class="sc ${s.direction}" id="sc-${s.id}">
 
-    <!-- DIRECCIÓN + SÍMBOLO -->
+    ${isMG ? `<div class="mg-banner m${mgLv}">
+      ⚠️ MARTINGALE M${mgLv} &nbsp;<span class="mg-mult">${mgMult}</span>&nbsp;— Dobla tu apuesta para recuperar
+    </div>` : ''}
+
+    <!-- CABECERA: dirección + símbolo + confianza -->
     <div class="sc-top">
       <div class="dir-badge ${s.direction}">
-        <div class="da">${s.direction==='CALL'?'▲':'▼'}</div>
-        <div class="dt">${s.direction}</div>
+        <div class="da" style="font-size:1.5rem">${s.direction==='CALL'?'▲':'▼'}</div>
+        <div class="dt">${s.direction==='CALL'?'COMPRA':'VENTA'}</div>
       </div>
       <div class="sc-info">
-        <div class="sc-sym">${s.symbol.replace('-OTC','')}<span style="font-size:.65rem;color:var(--t2);font-weight:500;margin-left:6px">${mt==='OTC'?'OTC Digital':'Real'}</span></div>
-        <div class="sc-row">
-          <span class="mtag">Expiración ${s.expiration}min</span>
-          <span class="mtag">${s.payout}% ganancia</span>
-          ${ai}
+        <div class="sc-sym">
+          ${(s.symbol||'').replace('-OTC','')}
+          <span class="mbadge ${mt}" style="margin-left:6px">${mt==='OTC'?'OTC':'Real'}</span>
         </div>
-        <div class="hm" style="margin-top:6px">${tfs}</div>
+        <div class="conf-bar">
+          <div class="conf-dots">${dots}</div>
+          <span class="conf-lbl" style="color:${conf.col}">${conf.label}</span>
+          <span style="font-size:.56rem;color:var(--t3);margin-left:4px">${sc}pts</span>
+        </div>
       </div>
     </div>
 
-    <!-- TIMER DE ENTRADA — lo más importante -->
+    <!-- TIMER -->
     ${entryHtml}
 
-    <!-- PATRONES Y RAZONES -->
-    <div class="rstrip">${reasons}</div>
+    <!-- RAZÓN SIMPLE -->
+    <div class="sc-reason">${reasonTxt}</div>
 
-    <!-- RESULTADO -->
-    <div class="sc-bot">${outcomeHtml}</div>
+    <!-- FONDO: payout, kelly, AI, win rate + botones -->
+    <div class="sc-bot" style="flex-wrap:wrap;gap:6px">
+      ${botInfo}
+      ${outcomeHtml}
+    </div>
   </div>`;
 }
 
@@ -738,24 +859,35 @@ async function loadStats(){
     document.getElementById('wr-fill').style.width=(d.win_rate||0)+'%';
     const rl=document.getElementById('recent-list');
     const items=(d.recent||[]).filter(s=>s.outcome);
-    rl.innerHTML=items.map(s=>`
-      <div class="recent-item">
+    rl.innerHTML=items.map(s=>{
+      const conf=confLevel(s.score||0);
+      const ts=s.timestamp?new Date(s.timestamp*1000).toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'}):'';
+      return `<div class="recent-item">
         <span class="r-dir ${s.direction}">${s.direction==='CALL'?'▲':'▼'}</span>
-        <span class="r-sym">${(s.symbol||'').replace('-OTC',' OTC')}</span>
-        <span style="font-size:.62rem;color:var(--t2)">${s.market_type==='OTC'?'OTC':'Real'}</span>
-        ${s.score?`<span style="font-size:.6rem;color:var(--t2)">${s.score}pts</span>`:''}
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span class="r-sym">${(s.symbol||'').replace('-OTC','')}</span>
+            <span style="font-size:.55rem;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,.06);color:var(--t2)">${(s.market_type||'').toUpperCase()==='OTC'?'OTC':'Real'}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:5px;margin-top:2px">
+            <span style="font-size:.6rem;color:${conf.col};font-weight:700">${conf.label}</span>
+            <span style="font-size:.58rem;color:var(--t3)">${s.score||0}pts</span>
+            ${ts?`<span class="hi-time">${ts}</span>`:''}
+          </div>
+        </div>
         <span class="r-out ${s.outcome}">${s.outcome==='WIN'?'✅ WIN':'❌ LOSS'}</span>
-      </div>`).join('') || `<div style="padding:16px 14px;color:var(--t2);font-size:.76rem">
-        Sin historial. Las señales aparecen aquí cuando las marcas como WIN o LOSS.</div>`;
+      </div>`;
+    }).join('') || `<div style="padding:16px 14px;color:var(--t2);font-size:.76rem">
+      Sin historial todavía. Cuando marques señales como ✅ Gané o ❌ Perdí, aparecerán aquí.</div>`;
   }catch(e){}
 }
 
 // ── Config tab assets ──────────────────────────────────────
 function renderConfigAssets(){
-  const top5 = mkt==='OTC'
-    ? ['EURUSD-OTC','GBPUSD-OTC','XAUUSD-OTC','USDJPY-OTC','AUDUSD-OTC']
-    : ['EURUSD','GBPUSD','XAUUSD','BTCUSD','USDJPY'];
-  document.getElementById('top5-grid').innerHTML = top5.map(s=>
+  const realPairs = ['EURUSD','EURJPY','EURGBP','GBPUSD'];
+  const otcPairs  = ['EURUSD-OTC','EURJPY-OTC','EURGBP-OTC','GBPUSD-OTC'];
+  const pairs = mkt==='OTC' ? otcPairs : realPairs;
+  document.getElementById('top5-grid').innerHTML = pairs.map(s=>
     `<span class="atag top5-tag">⭐ ${s}</span>`).join('');
 }
 
