@@ -230,6 +230,84 @@ async def index():
     return FileResponse(str(FRONTEND / "index.html"))
 
 
+@app.get("/get-ssid")
+async def get_ssid_page():
+    """Página de extracción de SSID — sirve desde localhost para evitar CORS."""
+    html = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Conectar Exnova</title>
+<style>
+  body{margin:0;background:#060912;color:#e8edf5;font-family:-apple-system,sans-serif;
+       display:flex;align-items:center;justify-content:center;height:100vh;}
+  .box{background:#0c1120;border:1px solid rgba(255,255,255,.1);border-radius:16px;
+       padding:32px;max-width:500px;width:90%;text-align:center;}
+  h2{color:#ffd700;margin:0 0 8px;}
+  p{color:#94a3b8;font-size:.85rem;margin:0 0 20px;line-height:1.5;}
+  .steps{text-align:left;background:#060912;border-radius:10px;padding:16px;margin-bottom:20px;}
+  .step{display:flex;align-items:flex-start;gap:10px;margin-bottom:12px;font-size:.85rem;}
+  .n{background:#ffd700;color:#060912;border-radius:50%;width:22px;height:22px;
+     display:flex;align-items:center;justify-content:center;font-weight:900;flex-shrink:0;font-size:.75rem;}
+  code{background:#1a2035;border:1px solid rgba(255,255,255,.1);border-radius:6px;
+       padding:10px;display:block;font-size:.72rem;color:#00ff87;word-break:break-all;
+       text-align:left;margin:12px 0;cursor:pointer;line-height:1.6;}
+  .btn{background:linear-gradient(135deg,#00ff87,#00c96b);color:#060912;border:none;
+       border-radius:8px;padding:12px 28px;font-size:.95rem;font-weight:800;
+       cursor:pointer;width:100%;}
+  .status{margin-top:14px;font-size:.85rem;padding:10px;border-radius:8px;display:none;}
+  .ok{background:rgba(0,255,135,.1);color:#00ff87;border:1px solid rgba(0,255,135,.2);}
+  .err{background:rgba(255,45,85,.1);color:#ff2d55;border:1px solid rgba(255,45,85,.2);}
+</style></head>
+<body>
+<div class="box">
+  <h2>🔑 Conectar Exnova al Scanner</h2>
+  <p>Tu sesión de Exnova ya está abierta en el browser.<br>
+     Sigue estos pasos para conectarla al scanner:</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="n">1</div>
+      <div>Ve a <b>trade.exnova.com</b> en otra pestaña (ya debes estar logueado)</div>
+    </div>
+    <div class="step">
+      <div class="n">2</div>
+      <div>Presiona <b>F12</b> → pestaña <b>Console</b></div>
+    </div>
+    <div class="step">
+      <div class="n">3</div>
+      <div>Copia y pega este código en la consola y presiona Enter:</div>
+    </div>
+  </div>
+
+  <code id="snippet" onclick="copySnippet()">fetch('http://localhost:8082/api/set_ssid',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:document.cookie.split(';').find(c=>c.trim().startsWith('ssid='))?.trim().slice(5)||''})}).then(r=>r.json()).then(d=>{alert(d.message||d.error)}).catch(e=>alert('Error: '+e))</code>
+
+  <p style="color:#ffd700;font-size:.75rem;margin-top:0">👆 Haz clic aquí para copiar automáticamente</p>
+
+  <div class="status ok" id="status-ok">✅ Exnova conectado — OTC activo los 7 días</div>
+  <div class="status err" id="status-err">❌ Error al conectar</div>
+</div>
+
+<script>
+function copySnippet(){
+  const txt = document.getElementById('snippet').textContent;
+  navigator.clipboard.writeText(txt).then(()=>{
+    document.getElementById('snippet').style.borderColor='#ffd700';
+    setTimeout(()=>document.getElementById('snippet').style.borderColor='',1500);
+  });
+}
+
+// Escuchar si el scanner ya recibió el SSID
+const ws = new WebSocket('ws://localhost:8082/ws');
+ws.onmessage = e => {
+  const m = JSON.parse(e.data);
+  if(m.type === 'broker_connected' && m.broker === 'iqoption'){
+    document.getElementById('status-ok').style.display = 'block';
+  }
+};
+</script>
+</body></html>"""
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=html)
+
+
 @app.post("/api/scan")
 async def api_scan():
     """Dispara un escaneo completo y espera el resultado antes de responder."""
