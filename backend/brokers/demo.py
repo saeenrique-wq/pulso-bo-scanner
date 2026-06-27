@@ -8,12 +8,10 @@ import yfinance as yf
 
 from .base import Asset, BaseBroker, BrokerConfig, Candle
 
-# ── PARES FOREX (Lun-Vie) ─────────────────────────────────
-TOP5_REAL    = ["EURUSD", "EURJPY", "EURGBP", "GBPUSD"]
-TOP5_OTC     = ["EURUSD-OTC", "EURJPY-OTC", "EURGBP-OTC", "GBPUSD-OTC"]
-
-# ── PARES CRYPTO OTC (24/7 incluyendo fin de semana) ──────
-TOP5_CRYPTO_OTC = ["BTCUSD-OTC", "ETHUSD-OTC", "XRPUSD-OTC"]
+# ── PARES FOREX OPCIONES BINARIAS ────────────────────────
+TOP5_REAL       = ["EURUSD", "EURJPY", "EURGBP", "GBPUSD"]
+TOP5_OTC        = ["EURUSD-OTC", "EURJPY-OTC", "EURGBP-OTC", "GBPUSD-OTC"]
+TOP5_CRYPTO_OTC = []   # sin crypto — solo forex
 
 # (ticker_yfinance, categoria, payout)
 REAL_ASSETS = {
@@ -28,10 +26,6 @@ OTC_ASSETS = {
     "GBPUSD-OTC": ("GBPUSD=X", "BO", 0.83),
     "EURJPY-OTC": ("EURJPY=X", "BO", 0.82),
     "EURGBP-OTC": ("EURGBP=X", "BO", 0.80),
-    # Crypto OTC — datos 24/7, operables en Exnova fines de semana
-    "BTCUSD-OTC": ("BTC-USD",  "Crypto", 0.85),
-    "ETHUSD-OTC": ("ETH-USD",  "Crypto", 0.84),
-    "XRPUSD-OTC": ("XRP-USD",  "Crypto", 0.83),
 }
 
 _TF  = {60: "1m", 300: "5m", 900: "15m", 3600: "1h"}
