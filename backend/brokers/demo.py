@@ -5,84 +5,63 @@ import asyncio
 from typing import Optional
 import pandas as pd
 import yfinance as yf
+import httpx
 
 from .base import Asset, BaseBroker, BrokerConfig, Candle
 
-# ── TOP 5 MÁS OPERADOS EN PLATAFORMAS BO ──────────────────
-# Escaneados primero y con prioridad — los de mayor volumen y señales
-TOP5_REAL = ["EURUSD", "GBPUSD", "XAUUSD", "BTCUSD", "USDJPY"]
-TOP5_OTC  = ["EURUSD-OTC", "GBPUSD-OTC", "XAUUSD-OTC", "USDJPY-OTC", "AUDUSD-OTC"]
+# ── LOS 5 PARES QUE ESCANEA ESTE BOT ────────────────────────
+# EURUSD, TRUMP COIN, EURJPY, EURGBP, GBPUSD
+TOP5_REAL = ["EURUSD", "TRUMPUSD", "EURJPY", "EURGBP", "GBPUSD"]
+TOP5_OTC  = ["EURUSD-OTC", "TRUMPUSD-OTC", "EURJPY-OTC", "EURGBP-OTC", "GBPUSD-OTC"]
 
-# ── ACTIVOS REALES — exactamente los disponibles en Quotex / IQ Option / Exnova / Pocket Option ──
-# (sym_bo): (ticker_yfinance, categoria_bo, payout_tipico)
+# ── ACTIVOS — prefijo "binance:" usa Binance API, resto usa yfinance ──
+# (ticker, categoria, payout)
 REAL_ASSETS = {
-    # Pares forex principales — disponibles en todas las plataformas BO
-    "EURUSD":  ("EURUSD=X",  "Forex",      0.87),
-    "GBPUSD":  ("GBPUSD=X",  "Forex",      0.86),
-    "USDJPY":  ("USDJPY=X",  "Forex",      0.85),
-    "AUDUSD":  ("AUDUSD=X",  "Forex",      0.84),
-    "USDCAD":  ("USDCAD=X",  "Forex",      0.84),
-    "USDCHF":  ("USDCHF=X",  "Forex",      0.83),
-    "NZDUSD":  ("NZDUSD=X",  "Forex",      0.82),
-    "EURGBP":  ("EURGBP=X",  "Forex",      0.82),
-    "EURJPY":  ("EURJPY=X",  "Forex",      0.85),
-    "GBPJPY":  ("GBPJPY=X",  "Forex",      0.84),
-    "GBPAUD":  ("GBPAUD=X",  "Forex",      0.82),
-    "EURCAD":  ("EURCAD=X",  "Forex",      0.82),
-    # Oro y Plata — los más operados en BO
-    "XAUUSD":  ("GC=F",      "Commodities", 0.88),
-    "XAGUSD":  ("SI=F",      "Commodities", 0.83),
-    # Petróleo — disponible en Quotex / IQ Option
-    "USOIL":   ("CL=F",      "Commodities", 0.80),
-    # Crypto — disponibles en todas las plataformas BO
-    "BTCUSD":  ("BTC-USD",   "Crypto",     0.86),
-    "ETHUSD":  ("ETH-USD",   "Crypto",     0.85),
-    "LTCUSD":  ("LTC-USD",   "Crypto",     0.83),
-    "XRPUSD":  ("XRP-USD",   "Crypto",     0.83),
-    # Índices — disponibles en Quotex y IQ Option
-    "US30":    ("^DJI",      "Indices",    0.80),
-    "US500":   ("^GSPC",     "Indices",    0.80),
-    "US100":   ("^NDX",      "Indices",    0.80),
-    "AUS200":  ("^AXJO",     "Indices",    0.80),
+    "EURUSD":   ("EURUSD=X",          "Forex",  0.87),
+    "GBPUSD":   ("GBPUSD=X",          "Forex",  0.86),
+    "EURJPY":   ("EURJPY=X",          "Forex",  0.85),
+    "EURGBP":   ("EURGBP=X",          "Forex",  0.82),
+    "USDJPY":   ("USDJPY=X",          "Forex",  0.85),
+    "AUDUSD":   ("AUDUSD=X",          "Forex",  0.84),
+    "USDCAD":   ("USDCAD=X",          "Forex",  0.84),
+    "USDCHF":   ("USDCHF=X",          "Forex",  0.83),
+    "NZDUSD":   ("NZDUSD=X",          "Forex",  0.82),
+    "GBPJPY":   ("GBPJPY=X",          "Forex",  0.84),
+    "XAUUSD":   ("GC=F",              "Commodities", 0.88),
+    "XAGUSD":   ("SI=F",              "Commodities", 0.83),
+    "USOIL":    ("CL=F",              "Commodities", 0.80),
+    "BTCUSD":   ("BTC-USD",           "Crypto", 0.86),
+    "ETHUSD":   ("ETH-USD",           "Crypto", 0.85),
+    "XRPUSD":   ("XRP-USD",           "Crypto", 0.83),
+    "TRUMPUSD": ("binance:TRUMPUSDT", "Crypto", 0.82),  # Binance API
+    "US30":     ("^DJI",              "Indices", 0.80),
+    "US500":    ("^GSPC",             "Indices", 0.80),
+    "US100":    ("^NDX",              "Indices", 0.80),
 }
 
-# ── ACTIVOS OTC — exclusivos de plataformas BO, disponibles 24/7 incluyendo fines de semana ──
-# Pares reales de Quotex / IQ Option / Pocket Option / Exnova.
-# Los pares exóticos (USDBRL, USDMXN, etc.) usan el precio spot de yfinance como proxy.
 OTC_ASSETS = {
-    # Majors OTC — todos los brokers BO
-    "EURUSD-OTC":  ("EURUSD=X",  "OTC", 0.84),
-    "GBPUSD-OTC":  ("GBPUSD=X",  "OTC", 0.83),
-    "USDJPY-OTC":  ("USDJPY=X",  "OTC", 0.82),
-    "AUDUSD-OTC":  ("AUDUSD=X",  "OTC", 0.82),
-    "USDCAD-OTC":  ("USDCAD=X",  "OTC", 0.81),
-    "USDCHF-OTC":  ("USDCHF=X",  "OTC", 0.81),
-    "NZDUSD-OTC":  ("NZDUSD=X",  "OTC", 0.80),
-    "EURGBP-OTC":  ("EURGBP=X",  "OTC", 0.80),
-    "EURJPY-OTC":  ("EURJPY=X",  "OTC", 0.82),
-    "GBPJPY-OTC":  ("GBPJPY=X",  "OTC", 0.81),
-    "NZDCAD-OTC":  ("NZDCAD=X",  "OTC", 0.80),
-    "EURCAD-OTC":  ("EURCAD=X",  "OTC", 0.80),
-    "GBPCAD-OTC":  ("GBPCAD=X",  "OTC", 0.80),
-    # Exóticos OTC — muy populares en Quotex / Pocket Option / Exnova
-    "USDBRL-OTC":  ("BRL=X",     "OTC", 0.82),
-    "USDMXN-OTC":  ("MXN=X",     "OTC", 0.80),
-    "USDINR-OTC":  ("INR=X",     "OTC", 0.80),
-    "USDTRY-OTC":  ("TRY=X",     "OTC", 0.82),
-    "USDZAR-OTC":  ("ZAR=X",     "OTC", 0.80),
-    "USDSGD-OTC":  ("SGD=X",     "OTC", 0.80),
-    "USDHKD-OTC":  ("HKD=X",     "OTC", 0.80),
-    "USDTWD-OTC":  ("TWD=X",     "OTC", 0.80),
-    # Commodities OTC
-    "XAUUSD-OTC":  ("GC=F",      "OTC", 0.85),
-    "XAGUSD-OTC":  ("SI=F",      "OTC", 0.82),
-    # Crypto OTC
-    "BTCUSD-OTC":  ("BTC-USD",   "OTC", 0.83),
-    "ETHUSD-OTC":  ("ETH-USD",   "OTC", 0.82),
+    "EURUSD-OTC":   ("EURUSD=X",          "OTC", 0.84),
+    "GBPUSD-OTC":   ("GBPUSD=X",          "OTC", 0.83),
+    "EURJPY-OTC":   ("EURJPY=X",          "OTC", 0.82),
+    "EURGBP-OTC":   ("EURGBP=X",          "OTC", 0.80),
+    "USDJPY-OTC":   ("USDJPY=X",          "OTC", 0.82),
+    "AUDUSD-OTC":   ("AUDUSD=X",          "OTC", 0.82),
+    "USDCAD-OTC":   ("USDCAD=X",          "OTC", 0.81),
+    "USDCHF-OTC":   ("USDCHF=X",          "OTC", 0.81),
+    "NZDUSD-OTC":   ("NZDUSD=X",          "OTC", 0.80),
+    "GBPJPY-OTC":   ("GBPJPY=X",          "OTC", 0.81),
+    "USDBRL-OTC":   ("BRL=X",             "OTC", 0.82),
+    "USDMXN-OTC":   ("MXN=X",             "OTC", 0.80),
+    "XAUUSD-OTC":   ("GC=F",              "OTC", 0.85),
+    "BTCUSD-OTC":   ("BTC-USD",           "OTC", 0.83),
+    "TRUMPUSD-OTC": ("binance:TRUMPUSDT", "OTC", 0.81),
 }
 
-_TF = {60: "1m", 300: "5m", 900: "15m", 3600: "1h"}
-_ALL = {**REAL_ASSETS, **OTC_ASSETS}
+_TF_YF  = {60: "1m", 300: "5m", 900: "15m", 3600: "1h"}
+_TF_BIN = {60: "1m", 300: "5m", 900: "15m", 3600: "1h"}
+_ALL    = {**REAL_ASSETS, **OTC_ASSETS}
+
+BINANCE_URL = "https://api.binance.com/api/v3/klines"
 
 
 class DemoBroker(BaseBroker):
@@ -112,8 +91,37 @@ class DemoBroker(BaseBroker):
         if not entry:
             return []
         ticker = entry[0]
-        interval = _TF.get(timeframe, "5m")
-        period = "3d" if timeframe <= 300 else "7d"
+
+        if ticker.startswith("binance:"):
+            return await self._binance_candles(ticker[8:], timeframe, count)
+        return await self._yfinance_candles(ticker, timeframe, count)
+
+    async def _binance_candles(self, pair: str, timeframe: int, count: int) -> list[Candle]:
+        interval = _TF_BIN.get(timeframe, "5m")
+        try:
+            async with httpx.AsyncClient(timeout=10) as c:
+                r = await c.get(BINANCE_URL, params={
+                    "symbol": pair, "interval": interval, "limit": count
+                })
+            if r.status_code != 200:
+                return []
+            return [
+                Candle(
+                    time   = int(k[0]) // 1000,
+                    open   = float(k[1]),
+                    high   = float(k[2]),
+                    low    = float(k[3]),
+                    close  = float(k[4]),
+                    volume = float(k[5]),
+                )
+                for k in r.json()
+            ]
+        except Exception:
+            return []
+
+    async def _yfinance_candles(self, ticker: str, timeframe: int, count: int) -> list[Candle]:
+        interval = _TF_YF.get(timeframe, "5m")
+        period   = "3d" if timeframe <= 300 else "7d"
         try:
             df = await asyncio.get_event_loop().run_in_executor(
                 None,
@@ -127,15 +135,13 @@ class DemoBroker(BaseBroker):
             def _v(cell, d=0.0):
                 if hasattr(cell, "iloc"):
                     return float(cell.iloc[0])
-                try:
-                    return float(cell)
-                except Exception:
-                    return d
+                try:   return float(cell)
+                except: return d
 
             return [
                 Candle(time=int(pd.Timestamp(ts).timestamp()),
                        open=_v(row["Open"]), high=_v(row["High"]),
-                       low=_v(row["Low"]),  close=_v(row["Close"]),
+                       low=_v(row["Low"]),   close=_v(row["Close"]),
                        volume=_v(row.get("Volume", 0.0)))
                 for ts, row in df.iterrows()
             ]
