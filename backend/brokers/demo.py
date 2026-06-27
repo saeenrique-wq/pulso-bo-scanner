@@ -149,9 +149,32 @@ class DemoBroker(BaseBroker):
             return []
 
 
-# Adapter stubs para brokers reales (instalan su propia lib)
+# ── Helpers para normalizar nombres OTC entre brokers ─────────
+# IQ Option / Exnova usan "EURUSD(OTC)" → nosotros usamos "EURUSD-OTC"
+# Pocket Option usa "EURUSD_otc" o "EURUSD-OTC"
+# Quotex usa "EURUSD-OTC" (ya compatible)
+
+def _to_internal(sym: str) -> str:
+    """Convierte nombre de broker → nombre interno (ej. EURUSD(OTC) → EURUSD-OTC)."""
+    s = sym.upper().strip().replace(" ", "")
+    if s.endswith("(OTC)"):
+        return s[:-5] + "-OTC"
+    if s.endswith("_OTC"):
+        return s[:-4] + "-OTC"
+    return s
+
+def _to_broker_otc(sym: str, style: str = "parens") -> str:
+    """Convierte nombre interno OTC → nombre del broker específico."""
+    base = sym.replace("-OTC", "").upper()
+    if style == "parens":   return base + "(OTC)"    # IQ Option / Exnova
+    if style == "dash":     return base + "-OTC"      # Quotex
+    if style == "underscore": return base + "_otc"    # Pocket Option
+    return sym
+
+
 class QuotexBroker(BaseBroker):
     name = "Quotex"; broker_id = "quotex"
+
     async def connect(self):
         try:
             from pyquotex.stable_api import Quotex
@@ -160,84 +183,135 @@ class QuotexBroker(BaseBroker):
             self.connected = ok; return ok
         except ImportError:
             print("[Quotex] pip install pyquotex"); return False
+
     async def disconnect(self):
-        if hasattr(self,'_c'): self._c.close(); self.connected=False
+        if hasattr(self,'_c'): self._c.close(); self.connected = False
+
     async def get_assets(self, market_type="REAL"):
         if not self.connected: return []
         raw = await self._c.get_all_asset()
-        return [Asset(s.get("symbol",""), self.name, s.get("payout",0)/100,
-                      s.get("open",False), market_type.upper(), "forex")
-                for s in (raw or []) if s.get("open") and s.get("payout",0)>=75]
+        result = []
+        for s in (raw or []):
+            if not s.get("open") or s.get("payout", 0) < 75:
+                continue
+            sym_int = _to_internal(s.get("symbol", ""))
+            is_otc  = sym_int.endswith("-OTC")
+            want_otc = market_type.upper() == "OTC"
+            if is_otc != want_otc:
+                continue
+            result.append(Asset(sym_int, self.name, s["payout"]/100,
+                                True, market_type.upper(), "Forex"))
+        return result
+
     async def get_candles(self, symbol, timeframe, count=150):
         if not self.connected: return []
+        # Quotex acepta "EURUSD-OTC" directamente
         raw = await self._c.get_candles(symbol, timeframe, timeframe*count, None)
-        return [Candle(int(c.get("time",0)),float(c.get("open",0)),
-                       float(c.get("max",0)),float(c.get("min",0)),
+        return [Candle(int(c.get("time",0)), float(c.get("open",0)),
+                       float(c.get("max",0)),  float(c.get("min",0)),
                        float(c.get("close",0))) for c in (raw or [])][-count:]
 
 
 class PocketBroker(BaseBroker):
     name = "PocketOption"; broker_id = "pocketoption"
+
     async def connect(self):
         try:
             from BinaryOptionsToolsV2.pocketoption import PocketOption
-            ssid = self.config.extra.get("ssid","")
+            ssid = self.config.extra.get("ssid", "")
             if not ssid: print("[PocketOption] falta POCKET_SSID"); return False
             self._c = PocketOption(ssid, self.config.demo)
-            await self._c.connect(); self.connected=True; return True
+            await self._c.connect(); self.connected = True; return True
         except ImportError:
             print("[PocketOption] pip install binaryoptionstoolsv2"); return False
+
     async def disconnect(self):
-        if hasattr(self,'_c'): await self._c.disconnect(); self.connected=False
+        if hasattr(self,'_c'): await self._c.disconnect(); self.connected = False
+
     async def get_assets(self, market_type="REAL"):
         if not self.connected: return []
         raw = await self._c.get_asset()
-        return [Asset(sym, self.name, d.get("payout",0)/100,
-                      d.get("open",False), market_type.upper(), "forex")
-                for sym,d in (raw or {}).items() if d.get("open") and d.get("payout",0)>=75]
+        result = []
+        for sym, d in (raw or {}).items():
+            if not d.get("open") or d.get("payout", 0) < 75:
+                continue
+            sym_int  = _to_internal(sym)
+            is_otc   = sym_int.endswith("-OTC")
+            want_otc = market_type.upper() == "OTC"
+            if is_otc != want_otc:
+                continue
+            result.append(Asset(sym_int, self.name, d["payout"]/100,
+                                True, market_type.upper(), "Forex"))
+        return result
+
     async def get_candles(self, symbol, timeframe, count=150):
         if not self.connected: return []
-        raw = await self._c.get_candles(symbol, timeframe, count)
-        return [Candle(int(c.get("time",0)),float(c.get("open",0)),
-                       float(c.get("max",c.get("high",0))),
-                       float(c.get("min",c.get("low",0))),
+        # Pocket Option usa "EURUSD_otc" para pares OTC
+        broker_sym = _to_broker_otc(symbol, "underscore") if symbol.endswith("-OTC") else symbol
+        raw = await self._c.get_candles(broker_sym, timeframe, count)
+        return [Candle(int(c.get("time",0)), float(c.get("open",0)),
+                       float(c.get("max", c.get("high",0))),
+                       float(c.get("min", c.get("low",0))),
                        float(c.get("close",0))) for c in (raw or [])]
 
 
 class IQBroker(BaseBroker):
+    """Exnova e IQ Option — OTC disponible 24/7 como mercado Digital."""
     name = "Exnova/IQOption"; broker_id = "iqoption"
+
     async def connect(self):
         try:
-            import time as _t
             from iqoptionapi.stable_api import IQ_Option
             self._c = IQ_Option(self.config.email, self.config.password)
             ok, _ = await asyncio.get_event_loop().run_in_executor(None, self._c.connect)
             if ok:
                 self._c.change_balance("PRACTICE" if self.config.demo else "REAL")
-                self.connected=True
+                self.connected = True
             return ok
         except ImportError:
             print("[IQOption] pip install iqoptionapi"); return False
+
     async def disconnect(self):
-        if hasattr(self,'_c'): self._c.close(); self.connected=False
+        if hasattr(self,'_c'): self._c.close(); self.connected = False
+
     async def get_assets(self, market_type="REAL"):
+        """
+        IQ Option / Exnova:
+          REAL → pares forex normales (ej. EURUSD) disponibles lun-vie
+          OTC  → pares digitales 24/7 (ej. EURUSD(OTC)) generados por el broker
+        """
         if not self.connected: return []
-        all_a = await asyncio.get_event_loop().run_in_executor(None, self._c.get_all_open_time)
-        assets=[]
-        for cat in ("forex","crypto","commodity"):
-            for sym,d in all_a.get(cat,{}).items():
-                if d.get("open"):
-                    pay=(d.get("profit",{}).get("front",0))/100
-                    if pay>=0.75:
-                        assets.append(Asset(sym.upper(),self.name,pay,True,market_type.upper(),cat))
-        return assets
+        all_a = await asyncio.get_event_loop().run_in_executor(
+            None, self._c.get_all_open_time)
+        result = []
+        # IQ Option organiza activos en "turbo","binary","digital" para real
+        # y en "forex" con nombre "(OTC)" para el mercado digital/OTC
+        for cat in ("forex", "crypto", "commodity", "turbo", "binary", "digital"):
+            for sym, d in all_a.get(cat, {}).items():
+                if not d.get("open"):
+                    continue
+                pay = d.get("profit", {}).get("front", 0) / 100
+                if pay < 0.75:
+                    continue
+                sym_int  = _to_internal(sym)
+                is_otc   = sym_int.endswith("-OTC")
+                want_otc = market_type.upper() == "OTC"
+                if is_otc != want_otc:
+                    continue
+                cat_norm = "Crypto" if "BTC" in sym_int or "ETH" in sym_int else "Forex"
+                result.append(Asset(sym_int, self.name, pay, True,
+                                    market_type.upper(), cat_norm))
+        return result
+
     async def get_candles(self, symbol, timeframe, count=150):
         if not self.connected: return []
         import time as _t
-        tf_min={60:1,300:5,900:15,3600:60}.get(timeframe,5)
+        # IQ Option / Exnova usa "EURUSD(OTC)" para el mercado digital
+        broker_sym = _to_broker_otc(symbol, "parens") if symbol.endswith("-OTC") else symbol
+        tf_sec = {60:60, 300:300, 900:900, 3600:3600}.get(timeframe, 300)
         raw = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: self._c.get_candles(symbol, tf_min*60, count, _t.time()))
-        return [Candle(int(c.get("from",0)),float(c.get("open",0)),
-                       float(c.get("max",0)),float(c.get("min",0)),
-                       float(c.get("close",0)),float(c.get("volume",0)))
+            None, lambda: self._c.get_candles(broker_sym, tf_sec, count, _t.time()))
+        return [Candle(int(c.get("from",0)), float(c.get("open",0)),
+                       float(c.get("max",0)),  float(c.get("min",0)),
+                       float(c.get("close",0)), float(c.get("volume",0)))
                 for c in (raw or [])]
