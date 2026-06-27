@@ -56,16 +56,21 @@ def chop_index(high, low, close, n=14):
     hl_range = (high.rolling(n).max() - low.rolling(n).min()).replace(0, np.nan)
     return (100 * np.log10(tr_sum / hl_range) / np.log10(n)).fillna(50)
 
-def trend_streak(close, n=3):
-    """Retorna cuántas velas consecutivas van en la misma dirección (+ = alza)."""
-    dirs = np.sign(close.diff())
+def trend_streak(close, n=10):
+    """Velas consecutivas en la misma dirección contando desde la última hacia atrás."""
+    dirs = np.sign(close.diff()).dropna()
+    if len(dirs) == 0:
+        return 0
+    last_dir = dirs.iloc[-1]
+    if last_dir == 0:
+        return 0
     streak = 0
-    for d in dirs.iloc[-n:]:
-        if d == dirs.iloc[-1]:
+    for d in reversed(dirs.tolist()):
+        if d == last_dir:
             streak += 1
         else:
             break
-    return int(streak * dirs.iloc[-1]) if not np.isnan(dirs.iloc[-1]) else 0
+    return int(streak)
 
 def candle_patterns(df: pd.DataFrame) -> dict:
     if len(df) < 3:

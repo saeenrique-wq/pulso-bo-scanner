@@ -261,12 +261,12 @@ body{background:var(--bg);color:var(--t);font-family:-apple-system,'SF Pro Displ
 
 <!-- CATEGORIES -->
 <div class="cat" id="cats">
-  <span class="chip on" data-c="all"      onclick="setCat(this)">Todos</span>
-  <span class="chip"    data-c="forex"    onclick="setCat(this)">💱 Forex</span>
-  <span class="chip"    data-c="crypto"   onclick="setCat(this)">₿ Crypto</span>
-  <span class="chip"    data-c="commodity"onclick="setCat(this)">🥇 Commodities</span>
-  <span class="chip"    data-c="index"    onclick="setCat(this)">📈 Índices</span>
-  <span class="chip"    data-c="otc"      onclick="setCat(this)">🕐 OTC</span>
+  <span class="chip on" data-c="all"         onclick="setCat(this)">Todos</span>
+  <span class="chip"    data-c="Forex"        onclick="setCat(this)">💱 Forex</span>
+  <span class="chip"    data-c="Crypto"       onclick="setCat(this)">₿ Crypto</span>
+  <span class="chip"    data-c="Commodities"  onclick="setCat(this)">🥇 Oro / Petróleo</span>
+  <span class="chip"    data-c="Indices"      onclick="setCat(this)">📈 Índices</span>
+  <span class="chip"    data-c="OTC"          onclick="setCat(this)">🕐 OTC 24/7</span>
 </div>
 
 <!-- SCAN BAR -->
@@ -418,16 +418,23 @@ async function loadStatus(){
 }
 
 function renderBrokers(){
-  document.getElementById('bkrow').innerHTML = brokers.map(b=>`
-    <div class="bk-pill ${b.id===broker?'active':''}"
-         onclick="setBroker('${b.id}')"
-         style="${b.id===broker?`border-color:${b.color};color:${b.color};background:${b.color}14;`:''}">
-      <div class="bk-dot ${b.connected?'on':''}"></div>${b.label}
-    </div>`).join('');
+  document.getElementById('bkrow').innerHTML = brokers.map(b=>{
+    const isActive = b.id===broker;
+    const style = isActive ? `border-color:${b.color};color:${b.color};background:${b.color}18;box-shadow:0 0 14px ${b.color}30;` : '';
+    const dot   = b.connected ? `<div class="bk-dot on"></div>` : (b.configured ? `<div class="bk-dot" style="background:#ffd700"></div>` : `<div class="bk-dot"></div>`);
+    const lbl   = b.configured ? b.label : `${b.label} <span style="font-size:.5rem;opacity:.6">Configurar</span>`;
+    return `<div class="bk-pill ${isActive?'active':''}" onclick="setBroker('${b.id}')" style="${style}">${dot}${lbl}</div>`;
+  }).join('');
 }
 
 async function setBroker(id){
   if(id===broker)return;
+  const bk = brokers.find(b=>b.id===id);
+  if(bk && !bk.configured){
+    toast(`⚙️ ${bk.label} requiere credenciales en el archivo .env`);
+    switchTab('config');
+    return;
+  }
   broker=id; sigs=[]; render(); renderBrokers();
   await fetch(API+'/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({broker_id:id})});
   loadAssets();
@@ -621,25 +628,58 @@ function bump(){
   setTimeout(()=>document.querySelectorAll('.sc.glow').forEach(c=>c.classList.remove('glow')),3500);
 }
 
-// ── Refresh ────────────────────────────────────────────────
+// ── Refresh / Scan manual ──────────────────────────────────
 async function refresh(){
-  toast('🔍 Actualizando…');
+  const fab=document.getElementById('fab');
+  fab.textContent='⏳'; fab.classList.add('spin');
+  toast('🔍 Escaneando mercado…');
   try{
-    const d=await(await fetch(API+'/api/signals')).json();
-    sigs=d; render(); loadStats();
-  }catch(e){ toast('❌ Error'); }
+    // Dispara escaneo inmediato en el servidor
+    await fetch(API+'/api/scan', {method:'POST'});
+    // El resultado llega por WebSocket (signal / scan_done)
+    // También recarga señales existentes como fallback
+    setTimeout(async()=>{
+      const d=await(await fetch(API+'/api/signals')).json();
+      sigs=d; render(); loadStats();
+      fab.textContent='🔍'; fab.classList.remove('spin');
+    }, 3000);
+  }catch(e){
+    toast('❌ Error al escanear');
+    fab.textContent='🔍'; fab.classList.remove('spin');
+  }
 }
 
 // ── Notifications ───────────────────────────────────────────
 async function toggleNotif(){
-  if(!('Notification'in window)){toast('No soportado');return;}
+  // En móvil Chrome/Edge las notificaciones requieren HTTPS o localhost
+  if(!('Notification' in window)){
+    toast('⚠️ Notificaciones no soportadas en este navegador');
+    return;
+  }
+  if(Notification.permission==='denied'){
+    toast('🚫 Bloqueadas — habilítalas en config del navegador');
+    return;
+  }
   if(Notification.permission==='granted'){
     notifOn=!notifOn;
     document.getElementById('notif-tog').className='ctog'+(notifOn?' on':'');
     toast(notifOn?'🔔 Notificaciones ON':'🔕 Notificaciones OFF');
-  }else{
+    return;
+  }
+  // pending — pedir permiso
+  try{
     const p=await Notification.requestPermission();
-    if(p==='granted'){notifOn=true;document.getElementById('notif-tog').className='ctog on';toast('🔔 Activadas');}
+    if(p==='granted'){
+      notifOn=true;
+      document.getElementById('notif-tog').className='ctog on';
+      toast('🔔 Notificaciones activadas');
+    } else if(p==='denied'){
+      toast('🚫 Permiso denegado — actívalas en tu navegador');
+    } else {
+      toast('⚠️ Cierra el diálogo y vuelve a intentar');
+    }
+  }catch(e){
+    toast('⚠️ Solo funciona en HTTPS o localhost');
   }
 }
 

@@ -29,10 +29,11 @@ from .indicators import (adx, atr, bollinger, candle_patterns, chop_index,
 
 Direction = Literal["CALL", "PUT"]
 
-MIN_SCORE   = 78    # mínimo para emitir señal (>80% efectividad)
-MIN_TF_AGREE = 3    # los 3 TF deben coincidir (M1+M5+M15)
+MIN_SCORE   = 20    # score mínimo por TF individual para contar dirección
+MIN_COMPOSITE = 28  # score compuesto mínimo — AI Ollama hace el filtro fino
+MIN_TF_AGREE = 2    # 2 de 3 TF deben coincidir (mayoría)
 MAX_CHOP    = 61.8  # rechazar si mercado es lateral
-MIN_STREAK  = 2     # mínimo 2 velas consecutivas en dirección
+MIN_STREAK  = 1     # al menos 1 vela en dirección
 MIN_PAYOUT  = 0.80
 
 TIMEFRAMES = [60, 300, 900]
@@ -101,6 +102,9 @@ def _to_df(candles) -> pd.DataFrame:
          for c in candles],
         columns=["time","open","high","low","close","volume"],
     ).sort_values("time").reset_index(drop=True)
+    # Eliminar velas finales planas (sin movimiento) — datos no actualizados de yfinance
+    while len(df) > 40 and df["close"].iloc[-1] == df["close"].iloc[-2]:
+        df = df.iloc[:-1]
     return df
 
 
@@ -129,13 +133,13 @@ def _analyze_tf(df: pd.DataFrame, tf: int) -> TFResult:
 
     # ── RSI (20 pts) ─────────────────────────────────────────
     r = rsi(close).iloc[-1]
-    if r < 25:
+    if r < 30:
         calls += 1; score += 20; reasons.append(f"RSI sobreventa {r:.1f}")
-    elif r > 75:
+    elif r > 70:
         puts  += 1; score += 20; reasons.append(f"RSI sobrecompra {r:.1f}")
-    elif r < 38:
+    elif r < 42:
         calls += 1; score += 10; reasons.append(f"RSI bajo {r:.1f}")
-    elif r > 62:
+    elif r > 58:
         puts  += 1; score += 10; reasons.append(f"RSI alto {r:.1f}")
 
     # ── MACD cross (20 pts) ──────────────────────────────────
@@ -254,7 +258,7 @@ def analyze(
         df = _to_df(candles_by_tf.get(tf, []))
         tf_results.append(_analyze_tf(df, tf))
 
-    # Todos los TF deben coincidir
+    # Mayoría de TF deben coincidir (2 de 3)
     dirs = [r.direction for r in tf_results if r.direction is not None]
     if len(dirs) < MIN_TF_AGREE:
         return None
@@ -271,7 +275,7 @@ def analyze(
         100
     ))
 
-    if composite < MIN_SCORE:
+    if composite < MIN_COMPOSITE:
         return None
 
     # Razones agregadas sin duplicar

@@ -18,7 +18,7 @@ from ai.ollama_validator import validate as ai_validate, is_available as ollama_
 from brokers.base        import BaseBroker, BrokerConfig
 from brokers.demo        import DemoBroker, QuotexBroker, PocketBroker, IQBroker
 from utils.config        import cfg
-from utils.telegram      import send as tg_send
+from utils.telegram      import send as tg_send, send_martingale as tg_martingale
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -171,16 +171,37 @@ async def index():
     return FileResponse(str(FRONTEND / "index.html"))
 
 
+@app.post("/api/scan")
+async def api_scan():
+    """Dispara un escaneo completo y espera el resultado antes de responder."""
+    broker = S.brokers.get(S.active_broker)
+    if not broker or not broker.is_ready():
+        return JSONResponse({"error": "broker no disponible"}, status_code=503)
+    before = len(S.signals)
+    await broadcast({"type":"scan_start","ts":time.time(),"broker":broker.name,"market":S.market_type})
+    await scan_once()
+    await broadcast({"type":"scan_done","ts":time.time()})
+    new_count = len(S.signals) - before
+    return {"ok": True, "broker": S.active_broker, "market": S.market_type,
+            "new_signals": max(0, new_count)}
+
+
 @app.get("/api/status")
 async def api_status():
+    # Siempre muestra TODOS los brokers conocidos, conectados o no
+    all_brokers = []
+    for bid, meta in BROKER_META.items():
+        b = S.brokers.get(bid)
+        all_brokers.append({
+            "id":        bid,
+            "label":     meta["label"],
+            "color":     meta["color"],
+            "connected": b.connected if b else False,
+            "active":    bid == S.active_broker,
+            "configured": b is not None,
+        })
     return {
-        "brokers": [
-            {"id":bid, "name":b.name, "connected":b.connected,
-             "active":bid==S.active_broker,
-             "label":BROKER_META.get(bid,{}).get("label",b.name),
-             "color":BROKER_META.get(bid,{}).get("color","#64748b")}
-            for bid,b in S.brokers.items()
-        ],
+        "brokers": all_brokers,
         "active_broker": S.active_broker,
         "market_type":   S.market_type,
         "scanning":      S.scanning,
@@ -235,8 +256,38 @@ async def api_outcome(body: dict):
     if not sid or outcome not in ("WIN","LOSS"):
         return JSONResponse({"error":"Need id and outcome"},status_code=400)
     mark_sig(sid, outcome)
+    # Buscar señal en memoria y actualizar
+    sig_dict = None
     for s in S.signals:
-        if s.get("id") == sid: s["outcome"] = outcome
+        if s.get("id") == sid:
+            s["outcome"] = outcome
+            # Escalar martingale si perdió
+            if outcome == "LOSS":
+                prev_mg = s.get("mg_level", 0)
+                if prev_mg < 3:
+                    s["mg_level"] = prev_mg + 1
+                    sig_dict = s
+            break
+    await broadcast({"type":"outcome","id":sid,"outcome":outcome})
+    # Enviar alerta martingale por Telegram si aplica
+    if sig_dict:
+        from dataclasses import SimpleNamespace
+        fake = SimpleNamespace(**{
+            "symbol":   sig_dict.get("symbol",""),
+            "direction":sig_dict.get("direction","CALL"),
+            "expiration":sig_dict.get("expiration",1),
+            "payout":   sig_dict.get("payout",80)/100,
+            "ai_score": sig_dict.get("ai_score",0)/100,
+            "kelly_pct":sig_dict.get("kelly_pct",0)/100,
+            "win_rate_hist": sig_dict.get("win_rate_hist",0)/100,
+        })
+        asyncio.create_task(tg_martingale(fake, sig_dict["mg_level"]))
+        # Emitir señal martingale a la UI
+        mg_sig = dict(sig_dict)
+        mg_sig["id"] = None
+        mg_sig["mg_level"] = sig_dict["mg_level"]
+        mg_sig["outcome"] = None
+        await broadcast({"type":"martingale","data":mg_sig,"level":sig_dict["mg_level"]})
     return {"ok":True}
 
 

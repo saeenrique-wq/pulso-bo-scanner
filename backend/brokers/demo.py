@@ -1,4 +1,4 @@
-"""Demo broker — datos reales vía yfinance, sin cuenta de broker."""
+"""Demo broker — activos reales de plataformas BO (Quotex, IQ Option, Pocket Option, Exnova)."""
 from __future__ import annotations
 
 import asyncio
@@ -8,39 +8,72 @@ import yfinance as yf
 
 from .base import Asset, BaseBroker, BrokerConfig, Candle
 
+# ── ACTIVOS REALES — exactamente los disponibles en Quotex / IQ Option / Exnova / Pocket Option ──
+# (sym_bo): (ticker_yfinance, categoria_bo, payout_tipico)
 REAL_ASSETS = {
-    "EURUSD": ("EURUSD=X", "forex", 0.87),
-    "GBPUSD": ("GBPUSD=X", "forex", 0.86),
-    "USDJPY": ("USDJPY=X", "forex", 0.85),
-    "AUDUSD": ("AUDUSD=X", "forex", 0.84),
-    "USDCAD": ("USDCAD=X", "forex", 0.83),
-    "USDCHF": ("USDCHF=X", "forex", 0.83),
-    "NZDUSD": ("NZDUSD=X", "forex", 0.82),
-    "EURGBP": ("EURGBP=X", "forex", 0.82),
-    "EURJPY": ("EURJPY=X", "forex", 0.85),
-    "GBPJPY": ("GBPJPY=X", "forex", 0.84),
-    "AUDJPY": ("AUDJPY=X", "forex", 0.83),
-    "XAUUSD": ("GC=F",     "commodity", 0.88),
-    "XAGUSD": ("SI=F",     "commodity", 0.83),
-    "BTCUSD": ("BTC-USD",  "crypto", 0.86),
-    "ETHUSD": ("ETH-USD",  "crypto", 0.85),
-    "XRPUSD": ("XRP-USD",  "crypto", 0.84),
-    "US500":  ("^GSPC",    "index",  0.80),
-    "US100":  ("^NDX",     "index",  0.80),
+    # Pares forex principales — disponibles en todas las plataformas BO
+    "EURUSD":  ("EURUSD=X",  "Forex",      0.87),
+    "GBPUSD":  ("GBPUSD=X",  "Forex",      0.86),
+    "USDJPY":  ("USDJPY=X",  "Forex",      0.85),
+    "AUDUSD":  ("AUDUSD=X",  "Forex",      0.84),
+    "USDCAD":  ("USDCAD=X",  "Forex",      0.84),
+    "USDCHF":  ("USDCHF=X",  "Forex",      0.83),
+    "NZDUSD":  ("NZDUSD=X",  "Forex",      0.82),
+    "EURGBP":  ("EURGBP=X",  "Forex",      0.82),
+    "EURJPY":  ("EURJPY=X",  "Forex",      0.85),
+    "GBPJPY":  ("GBPJPY=X",  "Forex",      0.84),
+    "GBPAUD":  ("GBPAUD=X",  "Forex",      0.82),
+    "EURCAD":  ("EURCAD=X",  "Forex",      0.82),
+    # Oro y Plata — los más operados en BO
+    "XAUUSD":  ("GC=F",      "Commodities", 0.88),
+    "XAGUSD":  ("SI=F",      "Commodities", 0.83),
+    # Petróleo — disponible en Quotex / IQ Option
+    "USOIL":   ("CL=F",      "Commodities", 0.80),
+    # Crypto — disponibles en todas las plataformas BO
+    "BTCUSD":  ("BTC-USD",   "Crypto",     0.86),
+    "ETHUSD":  ("ETH-USD",   "Crypto",     0.85),
+    "LTCUSD":  ("LTC-USD",   "Crypto",     0.83),
+    "XRPUSD":  ("XRP-USD",   "Crypto",     0.83),
+    # Índices — disponibles en Quotex y IQ Option
+    "US30":    ("^DJI",      "Indices",    0.80),
+    "US500":   ("^GSPC",     "Indices",    0.80),
+    "US100":   ("^NDX",      "Indices",    0.80),
+    "AUS200":  ("^AXJO",     "Indices",    0.80),
 }
 
+# ── ACTIVOS OTC — exclusivos de plataformas BO, disponibles 24/7 incluyendo fines de semana ──
+# Pares reales de Quotex / IQ Option / Pocket Option / Exnova.
+# Los pares exóticos (USDBRL, USDMXN, etc.) usan el precio spot de yfinance como proxy.
 OTC_ASSETS = {
-    "EURUSD-OTC": ("EURUSD=X", "otc", 0.84),
-    "GBPUSD-OTC": ("GBPUSD=X", "otc", 0.83),
-    "USDJPY-OTC": ("USDJPY=X", "otc", 0.82),
-    "AUDUSD-OTC": ("AUDUSD=X", "otc", 0.81),
-    "USDCAD-OTC": ("USDCAD=X", "otc", 0.80),
-    "EURGBP-OTC": ("EURGBP=X", "otc", 0.80),
-    "EURJPY-OTC": ("EURJPY=X", "otc", 0.82),
-    "GBPJPY-OTC": ("GBPJPY=X", "otc", 0.81),
-    "XAUUSD-OTC": ("GC=F",     "otc", 0.85),
-    "BTCUSD-OTC": ("BTC-USD",  "otc", 0.83),
-    "ETHUSD-OTC": ("ETH-USD",  "otc", 0.82),
+    # Majors OTC — todos los brokers BO
+    "EURUSD-OTC":  ("EURUSD=X",  "OTC", 0.84),
+    "GBPUSD-OTC":  ("GBPUSD=X",  "OTC", 0.83),
+    "USDJPY-OTC":  ("USDJPY=X",  "OTC", 0.82),
+    "AUDUSD-OTC":  ("AUDUSD=X",  "OTC", 0.82),
+    "USDCAD-OTC":  ("USDCAD=X",  "OTC", 0.81),
+    "USDCHF-OTC":  ("USDCHF=X",  "OTC", 0.81),
+    "NZDUSD-OTC":  ("NZDUSD=X",  "OTC", 0.80),
+    "EURGBP-OTC":  ("EURGBP=X",  "OTC", 0.80),
+    "EURJPY-OTC":  ("EURJPY=X",  "OTC", 0.82),
+    "GBPJPY-OTC":  ("GBPJPY=X",  "OTC", 0.81),
+    "NZDCAD-OTC":  ("NZDCAD=X",  "OTC", 0.80),
+    "EURCAD-OTC":  ("EURCAD=X",  "OTC", 0.80),
+    "GBPCAD-OTC":  ("GBPCAD=X",  "OTC", 0.80),
+    # Exóticos OTC — muy populares en Quotex / Pocket Option / Exnova
+    "USDBRL-OTC":  ("BRL=X",     "OTC", 0.82),
+    "USDMXN-OTC":  ("MXN=X",     "OTC", 0.80),
+    "USDINR-OTC":  ("INR=X",     "OTC", 0.80),
+    "USDTRY-OTC":  ("TRY=X",     "OTC", 0.82),
+    "USDZAR-OTC":  ("ZAR=X",     "OTC", 0.80),
+    "USDSGD-OTC":  ("SGD=X",     "OTC", 0.80),
+    "USDHKD-OTC":  ("HKD=X",     "OTC", 0.80),
+    "USDTWD-OTC":  ("TWD=X",     "OTC", 0.80),
+    # Commodities OTC
+    "XAUUSD-OTC":  ("GC=F",      "OTC", 0.85),
+    "XAGUSD-OTC":  ("SI=F",      "OTC", 0.82),
+    # Crypto OTC
+    "BTCUSD-OTC":  ("BTC-USD",   "OTC", 0.83),
+    "ETHUSD-OTC":  ("ETH-USD",   "OTC", 0.82),
 }
 
 _TF = {60: "1m", 300: "5m", 900: "15m", 3600: "1h"}
