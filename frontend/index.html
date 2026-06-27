@@ -124,12 +124,43 @@ body{display:flex;flex-direction:column;}
 .mbadge.OTC{background:rgba(139,92,246,.2);color:#c4b5fd;border:1px solid rgba(139,92,246,.3);}
 .mtag{font-size:.61rem;color:var(--t2);}
 
-.score-ring{width:48px;height:48px;border-radius:50%;border:2.5px solid;display:flex;
-  align-items:center;justify-content:center;font-weight:900;font-size:.88rem;flex-shrink:0;}
-.score-ring.A{border-color:var(--g);color:var(--g);}
-.score-ring.B{border-color:var(--gold);color:var(--gold);}
-.score-ring.C{border-color:#4b5563;color:#6b7280;}
-.payout-lbl{font-size:.58rem;color:var(--gold);font-weight:700;text-align:center;margin-top:2px;}
+/* ── TIMER DE ENTRADA ────────────────────────────────────── */
+.entry-box{
+  margin:10px 0 6px;padding:12px 14px;border-radius:12px;
+  display:flex;align-items:center;gap:12px;
+  border:2px solid;transition:border-color .3s,background .3s;
+}
+.entry-label{font-size:.55rem;font-weight:800;letter-spacing:.08em;opacity:.7;white-space:nowrap;}
+.entry-time{font-size:1.55rem;font-weight:900;letter-spacing:.04em;line-height:1;flex:1;}
+.entry-countdown{
+  font-size:1.1rem;font-weight:900;min-width:58px;text-align:center;
+  padding:4px 8px;border-radius:8px;
+}
+.entry-expiry{font-size:.58rem;opacity:.6;white-space:nowrap;}
+
+/* Estados del timer */
+.timer-ok     {border-color:rgba(0,200,100,.35);background:rgba(0,200,100,.07);}
+.timer-ok .entry-time{color:var(--g);}
+.timer-ok .entry-countdown{background:rgba(0,200,100,.15);color:var(--g);}
+
+.timer-warn   {border-color:rgba(255,193,7,.45);background:rgba(255,193,7,.08);}
+.timer-warn .entry-time{color:var(--gold);}
+.timer-warn .entry-countdown{background:rgba(255,193,7,.2);color:var(--gold);}
+
+.timer-urgent {border-color:rgba(255,45,85,.6);background:rgba(255,45,85,.12);
+               animation:pulse-entry .5s infinite alternate;}
+.timer-urgent .entry-time{color:var(--r);}
+.timer-urgent .entry-countdown{background:rgba(255,45,85,.25);color:var(--r);}
+
+.timer-now    {border-color:rgba(255,45,85,.8);background:rgba(255,45,85,.2);
+               animation:pulse-entry .3s infinite alternate;}
+.timer-now .entry-time{color:var(--r);}
+.timer-now .entry-countdown{background:var(--r);color:#fff;font-size:1rem;}
+
+@keyframes pulse-entry{
+  from{box-shadow:0 0 0 0 rgba(255,45,85,.4);}
+  to  {box-shadow:0 0 0 8px rgba(255,45,85,0);}
+}
 
 /* TF heatmap */
 .hm{display:flex;gap:4px;padding:8px 12px 4px;}
@@ -590,47 +621,60 @@ function render(){
   list.innerHTML=filtered.map(s=>sigCard(s)).join('');
 }
 
+// ── Formato de hora HH:MM:SS ────────────────────────────────
+function fmtTime(unix){
+  const d = new Date(unix*1000);
+  const h = String(d.getHours()).padStart(2,'0');
+  const m = String(d.getMinutes()).padStart(2,'0');
+  const s = String(d.getSeconds()).padStart(2,'0');
+  return `${h}:${m}:${s}`;
+}
+
+// Calcula segundos restantes y clases CSS de urgencia para el timer
+function timerState(entry_time){
+  const now   = Date.now()/1000;
+  const secs  = Math.round(entry_time - now);
+  if(secs <= 0)   return {secs, label:'¡ENTRA YA!', cls:'timer-now',  past: secs < -5};
+  if(secs <= 15)  return {secs, label:`¡${secs}s!`, cls:'timer-urgent'};
+  if(secs <= 40)  return {secs, label:`${secs}s`,   cls:'timer-warn'};
+  return              {secs, label:`${secs}s`,       cls:'timer-ok'};
+}
+
 function sigCard(s){
-  const sc  = s.score>=70?'A':s.score>=45?'B':'C';
   const mt  = (s.market_type||'REAL').toUpperCase();
   const tfs = (s.tf_results||[]).map(t=>{
     const dir=t.dir||'NONE', arrow=dir==='CALL'?'▲':dir==='PUT'?'▼':'—';
     return `<div class="hc ${dir}">
       <div class="tf">${t.tf}</div>
       <div class="arrow">${arrow}</div>
-      <div class="hsc">${t.score}</div>
     </div>`;
   }).join('');
 
-  // Volatilidad y chop del TF principal (M5)
-  const m5 = (s.tf_results||[]).find(t=>t.tf==='M5') || {};
-  const vol = s.volatility||50;
-  const chop= m5.chop||50;
-  const volColor = vol<15?'#4b5563':vol>75?'var(--r)':'var(--g2)';
-  const chopColor= chop>61.8?'var(--r)':chop<38?'var(--g)':'var(--gold)';
-  const volLabel = vol<15?'Dormido':vol<40?'Bajo':vol<70?'Ideal':'Alto';
-  const chopLabel= chop>61.8?'Lateral':chop<38?'Tendencia':'Mixto';
-
-  const ai = s.ai_score>0
-    ? `<span class="ai-inline">🤖 ${s.ai_score}%</span>` : '';
-  const kelly = s.kelly_pct>0
-    ? `<span class="kelly-lbl">Kelly ${s.kelly_pct}%</span>` : '';
-  const wr = s.win_rate_hist>0
-    ? `<span class="wr-lbl">Hist ${s.win_rate_hist}%</span>` : '';
-  const mgLbl = s.mg_level>0
-    ? `<span class="mg-lbl m${s.mg_level}">MG${s.mg_level}</span>` : '';
-
-  const reasons=(s.reasons||[]).slice(0,5).map(r=>
+  const reasons=(s.reasons||[]).slice(0,4).map(r=>
     `<span class="rtag">${r.replace(/\[M\d+\]\s*/,'')}</span>`).join('');
+
+  const ai = s.ai_score>0 ? `<span class="ai-inline">IA ${s.ai_score}%</span>` : '';
+
+  // Timer de entrada
+  const ts = s.entry_time ? timerState(s.entry_time) : null;
+  const entryHtml = s.entry_time ? `
+    <div class="entry-box ${ts.cls}" id="etb-${s.id}" data-entry="${s.entry_time}" data-expiry="${s.expiry_time}">
+      <div class="entry-label">ENTRA A LAS</div>
+      <div class="entry-time">${fmtTime(s.entry_time)}</div>
+      <div class="entry-countdown" id="ecd-${s.id}">${ts.label}</div>
+      <div class="entry-expiry">Expira ${fmtTime(s.expiry_time)}</div>
+    </div>` : '';
 
   const outcomeHtml = s.outcome
     ? `<div class="outcome-badge ${s.outcome}">${s.outcome==='WIN'?'✅ WIN':'❌ LOSS'}</div>`
     : `<div class="outcomes">
-        <button class="btn-w" onclick="markOut('${s.id}','WIN',event)">✅</button>
-        <button class="btn-l" onclick="markOut('${s.id}','LOSS',event)">❌</button>
+        <button class="btn-w" onclick="markOut('${s.id}','WIN',event)">✅ WIN</button>
+        <button class="btn-l" onclick="markOut('${s.id}','LOSS',event)">❌ LOSS</button>
        </div>`;
 
   return `<div class="sc ${s.direction}" id="sc-${s.id}">
+
+    <!-- DIRECCIÓN + SÍMBOLO -->
     <div class="sc-top">
       <div class="dir-badge ${s.direction}">
         <div class="da">${s.direction==='CALL'?'▲':'▼'}</div>
@@ -640,37 +684,22 @@ function sigCard(s){
         <div class="sc-sym">${s.symbol}</div>
         <div class="sc-row">
           <span class="mbadge ${mt}">${mt}</span>
-          <span class="mtag">⏱ ${s.expiration}min</span>
-          <span class="mtag">${ago(s.timestamp)}</span>
+          <span class="mtag">${s.expiration}min</span>
+          <span class="mtag">${s.payout}% payout</span>
           ${ai}
         </div>
-      </div>
-      <div style="text-align:center;flex-shrink:0">
-        <div class="score-ring ${sc}">${s.score}</div>
-        <div class="payout-lbl">${s.payout}%</div>
+        <div class="hm" style="margin-top:6px">${tfs}</div>
       </div>
     </div>
 
-    <div class="hm">${tfs}</div>
+    <!-- TIMER DE ENTRADA — lo más importante -->
+    ${entryHtml}
 
-    <div class="meters">
-      <div class="meter-item">
-        <div class="meter-lbl">Volatilidad · ${volLabel}</div>
-        <div class="meter-bar"><div class="meter-fill" style="width:${Math.min(vol,100)}%;background:${volColor}"></div></div>
-      </div>
-      <div class="meter-item">
-        <div class="meter-lbl">Mercado · ${chopLabel}</div>
-        <div class="meter-bar"><div class="meter-fill" style="width:${Math.min(chop,100)}%;background:${chopColor}"></div></div>
-      </div>
-    </div>
+    <!-- PATRONES Y RAZONES -->
+    <div class="rstrip">${reasons}</div>
 
-    <div class="rstrip">${reasons}${mgLbl}</div>
-
-    <div class="sc-bot">
-      <span class="exp-lbl">Exp <span class="expv">${s.expiration}m</span></span>
-      ${kelly}${wr}
-      ${outcomeHtml}
-    </div>
+    <!-- RESULTADO -->
+    <div class="sc-bot">${outcomeHtml}</div>
   </div>`;
 }
 
@@ -800,9 +829,39 @@ function ago(ts){
   return d<60?d+'s':d<3600?Math.floor(d/60)+'m':Math.floor(d/3600)+'h';
 }
 
+// ── Actualizar timers de entrada cada segundo ───────────────
+function tickTimers(){
+  document.querySelectorAll('[data-entry]').forEach(box=>{
+    const id      = box.id.replace('etb-','');
+    const entry   = parseFloat(box.dataset.entry);
+    const expiry  = parseFloat(box.dataset.expiry);
+    const now     = Date.now()/1000;
+    const st      = timerState(entry);
+    const cd      = document.getElementById('ecd-'+id);
+
+    if(st.past){
+      // Señal expirada — opacar
+      box.style.opacity='0.35';
+      if(cd) cd.textContent = 'EXPIRADO';
+      return;
+    }
+    // Actualizar clase y countdown
+    box.className = 'entry-box '+st.cls;
+    if(cd) cd.textContent = st.label;
+
+    // Notificación cuando quedan ≤ 10 segundos
+    if(st.secs <= 10 && st.secs > 0 && !box._notified){
+      box._notified = true;
+      const sig = sigs.find(x=>x.id==id);
+      if(sig) pushNotif(sig);
+    }
+  });
+}
+
 // ── INIT ───────────────────────────────────────────────────
 connect();
-setInterval(loadStats,30000);
+setInterval(loadStats, 30000);
+setInterval(tickTimers, 1000);
 </script>
 </body>
 </html>

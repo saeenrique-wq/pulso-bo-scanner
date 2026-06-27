@@ -53,7 +53,7 @@ class Signal:
     direction: Direction
     score: int
     payout: float
-    expiration: int
+    expiration: int          # minutos de duración de la opción
     market_type: str   = "REAL"
     category: str      = "Forex"
     timestamp: float   = field(default_factory=time.time)
@@ -63,6 +63,8 @@ class Signal:
     ai_score: float  = 0.0
     kelly_pct: float = 0.0
     volatility: float = 50.0
+    entry_time: float = 0.0   # unix timestamp: apertura de la SIGUIENTE vela
+    expiry_time: float = 0.0  # unix timestamp: cuándo expira la opción
 
     def to_dict(self) -> dict:
         return {
@@ -75,6 +77,8 @@ class Signal:
             "market_type":   self.market_type,
             "category":      self.category,
             "timestamp":     self.timestamp,
+            "entry_time":    self.entry_time,
+            "expiry_time":   self.expiry_time,
             "reasons":       self.reasons,
             "win_rate_hist": round(self.win_rate_hist * 100, 1),
             "ai_score":      round(self.ai_score * 100, 1),
@@ -717,6 +721,13 @@ def analyze(
     exp_tf = min(r.tf for r in matching)
     kelly  = kelly_criterion(win_rate_hist, payout)
 
+    # Calcular tiempo exacto de entrada = apertura de la SIGUIENTE vela del TF más corto
+    now = time.time()
+    tf_sec = exp_tf                                          # 60, 300 o 900 segundos
+    current_candle_open = int(now // tf_sec) * tf_sec       # apertura de la vela actual
+    entry_time  = current_candle_open + tf_sec              # SIGUIENTE vela = entrar aquí
+    expiry_time = entry_time + tf_sec                       # cuándo expira la opción
+
     return Signal(
         symbol=symbol, broker=broker, direction=direction,
         score=composite, payout=payout,
@@ -725,4 +736,6 @@ def analyze(
         reasons=all_reasons, tf_results=tf_results,
         win_rate_hist=win_rate_hist, kelly_pct=kelly,
         volatility=avg_vol,
+        entry_time=entry_time,
+        expiry_time=expiry_time,
     )
