@@ -176,8 +176,9 @@ def _broker_for(mt: str):
 
 
 async def _scan_market(mt: str):
-    """Escanea los 4 pares en un mercado (REAL u OTC)."""
-    from brokers.demo import TOP5_REAL, TOP5_OTC
+    """Escanea pares en un mercado. OTC incluye crypto 24/7 (fin de semana automático)."""
+    from brokers.demo import TOP5_REAL, TOP5_OTC, TOP5_CRYPTO_OTC
+    from datetime import datetime, timezone
     broker = _broker_for(mt)
     if not broker or not broker.is_ready():
         log.debug(f"[{mt}] sin broker disponible"); return
@@ -186,7 +187,15 @@ async def _scan_market(mt: str):
     except Exception as e:
         log.warning(f"get_assets [{mt}]: {e}"); return
 
-    top5    = TOP5_OTC if mt == "OTC" else TOP5_REAL
+    if mt == "OTC":
+        now_utc = datetime.now(tz=timezone.utc)
+        is_weekend = now_utc.weekday() >= 5   # sab=5, dom=6
+        # Fin de semana: crypto OTC 24/7 + intentar forex OTC igual
+        # Entre semana: forex OTC + crypto siempre
+        top5 = TOP5_OTC + TOP5_CRYPTO_OTC
+    else:
+        top5 = TOP5_REAL
+
     ordered = [a for a in all_assets
                if a.symbol in top5
                and a.payout >= cfg.MIN_PAYOUT_PCT / 100]
