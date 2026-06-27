@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<title>Pulso BO Scanner PRO</title>
+<style>
+:root{
+  --bg:#050810;--bg2:#0b1020;--card:rgba(255,255,255,.04);--card2:rgba(255,255,255,.07);
+  --b:rgba(255,255,255,.08);--b2:rgba(255,255,255,.14);
+  --g:#00ff87;--g2:#00c96b;--r:#ff2d55;--r2:#c8002a;
+  --gold:#ffd700;--blue:#4d9fff;--purple:#a855f7;--cyan:#00e5ff;--orange:#ff7c00;
+  --t:#e8edf5;--t2:#94a3b8;--t3:#374151;
+  --nav:64px;--safe:env(safe-area-inset-bottom,0px);--rad:14px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overflow:hidden;}
+body{background:var(--bg);color:var(--t);font-family:-apple-system,'SF Pro Display','Segoe UI',system-ui,sans-serif;display:flex;flex-direction:column;}
+
+/* ── HEADER ── */
+.hdr{flex-shrink:0;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 0;background:linear-gradient(180deg,rgba(5,8,16,.97) 0%,transparent 100%);z-index:50;}
+.hdr-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+.logo{display:flex;align-items:center;gap:9px;}
+.logo-ico{width:36px;height:36px;background:linear-gradient(135deg,#ffd700,#ff6600);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 0 18px rgba(255,215,0,.35);}
+.logo-txt{font-size:.95rem;font-weight:800;letter-spacing:-.2px;}
+.logo-txt b{color:var(--gold);}
+.hdr-right{display:flex;align-items:center;gap:8px;}
+.pill{display:flex;align-items:center;gap:5px;background:rgba(0,255,135,.08);border:1px solid rgba(0,255,135,.2);border-radius:20px;padding:4px 10px;font-size:.68rem;font-weight:700;color:var(--g);letter-spacing:.4px;}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--g);animation:blink 1.2s infinite;}
+.dot.off{background:var(--t3);animation:none;}
+.dot.scan{background:var(--gold);}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.ico-btn{width:34px;height:34px;border-radius:10px;background:var(--card2);border:1px solid var(--b);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;position:relative;}
+.ai-dot{position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:var(--g);box-shadow:0 0 6px var(--g);display:none;}
+.ai-dot.on{display:block;}
+
+/* ── MARKET TOGGLE ── */
+.sel-sec{padding:0 16px 8px;flex-shrink:0;}
+.mkt-toggle{display:flex;background:var(--card);border:1px solid var(--b);border-radius:12px;padding:3px;margin-bottom:10px;}
+.mkt-btn{flex:1;padding:9px;border:none;border-radius:9px;background:transparent;color:var(--t2);font-size:.8rem;font-weight:700;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:6px;letter-spacing:.3px;}
+.mkt-btn.real{background:linear-gradient(135deg,#1e3a7a,#1d4ed8);color:#fff;box-shadow:0 0 22px rgba(29,78,216,.4);}
+.mkt-btn.otc{background:linear-gradient(135deg,#4c1d95,#7c3aed);color:#fff;box-shadow:0 0 22px rgba(124,58,237,.4);}
+.mkt-tag{font-size:.55rem;padding:2px 5px;border-radius:4px;background:rgba(255,255,255,.15);letter-spacing:.4px;}
+
+/* ── BROKER PILLS ── */
+.bk-scroll{display:flex;gap:7px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none;}
+.bk-scroll::-webkit-scrollbar{display:none;}
+.bk-pill{flex-shrink:0;display:flex;align-items:center;gap:6px;padding:7px 14px;border-radius:20px;border:1.5px solid var(--b);background:var(--card);color:var(--t2);font-size:.73rem;font-weight:700;cursor:pointer;transition:all .2s;white-space:nowrap;}
+.bk-pill.active{border-color:var(--gold);color:var(--gold);background:rgba(255,215,0,.08);box-shadow:0 0 14px rgba(255,215,0,.18);}
+.bk-dot{width:7px;height:7px;border-radius:50%;background:var(--t3);}
+.bk-dot.on{background:var(--g);box-shadow:0 0 5px var(--g);}
+
+/* ── CATEGORY FILTER ── */
+.cat{display:flex;gap:6px;overflow-x:auto;padding:0 16px 10px;scrollbar-width:none;flex-shrink:0;}
+.cat::-webkit-scrollbar{display:none;}
+.chip{flex-shrink:0;padding:6px 14px;border-radius:20px;border:1px solid var(--b);background:var(--card);color:var(--t2);font-size:.7rem;font-weight:600;cursor:pointer;transition:all .2s;}
+.chip.on{background:var(--card2);border-color:var(--b2);color:var(--t);}
+
+/* ── SCAN BAR ── */
+.sbar{flex-shrink:0;height:2px;margin:0 16px 6px;border-radius:2px;overflow:hidden;background:transparent;}
+.sbar.active{background:rgba(255,255,255,.06);}
+.sbar-fill{height:100%;width:0;background:linear-gradient(90deg,var(--blue),var(--cyan));border-radius:2px;}
+.sbar.active .sbar-fill{animation:sweep 2.5s linear infinite;}
+@keyframes sweep{0%{width:0;margin-left:0}50%{width:55%;margin-left:45%}100%{width:0;margin-left:100%}}
+
+/* ── SCROLL AREA ── */
+.scroll{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
+
+/* ── TAB PAGES ── */
+.page{display:none;padding:0 16px 16px;}
+.page.on{display:block;}
+
+/* ── SIGNAL CARDS ── */
+#slist{display:flex;flex-direction:column;gap:9px;padding:4px 16px 16px;}
+
+.sc{border-radius:var(--rad);border:1px solid var(--b);background:var(--card);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);overflow:hidden;position:relative;animation:fadeIn .3s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.sc::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:3px 0 0 3px;}
+.sc.CALL::before{background:var(--g);}
+.sc.PUT::before{background:var(--r);}
+.sc.glow.CALL{box-shadow:0 0 28px rgba(0,255,135,.15);}
+.sc.glow.PUT{box-shadow:0 0 28px rgba(255,45,85,.15);}
+
+/* top row */
+.sc-top{display:flex;align-items:center;gap:11px;padding:11px 13px 0;}
+.dir-pill{width:58px;height:54px;border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0;font-weight:900;}
+.dir-pill.CALL{background:rgba(0,255,135,.1);border:1.5px solid rgba(0,255,135,.28);color:var(--g);}
+.dir-pill.PUT{background:rgba(255,45,85,.1);border:1.5px solid rgba(255,45,85,.28);color:var(--r);}
+.da{font-size:1.25rem;line-height:1;}
+.dt{font-size:.6rem;margin-top:1px;}
+
+.sc-info{flex:1;min-width:0;}
+.sc-sym{font-size:1.1rem;font-weight:800;letter-spacing:-.3px;}
+.sc-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:3px;}
+.mbadge{font-size:.56rem;font-weight:800;padding:2px 6px;border-radius:5px;letter-spacing:.4px;}
+.mbadge.REAL{background:rgba(29,78,216,.2);color:#93c5fd;border:1px solid rgba(29,78,216,.35);}
+.mbadge.OTC{background:rgba(124,58,237,.2);color:#c4b5fd;border:1px solid rgba(124,58,237,.35);}
+.mtag{font-size:.63rem;color:var(--t2);}
+.bktag{font-size:.6rem;color:var(--t3);font-weight:600;}
+
+/* score */
+.sw{text-align:center;flex-shrink:0;}
+.sring{width:50px;height:50px;border-radius:50%;border:2.5px solid;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:.9rem;}
+.sring.A{border-color:var(--g);color:var(--g);background:rgba(0,255,135,.06);}
+.sring.B{border-color:var(--gold);color:var(--gold);background:rgba(255,215,0,.06);}
+.sring.C{border-color:var(--t3);color:var(--t3);}
+.ptag{font-size:.6rem;color:var(--gold);font-weight:700;margin-top:3px;text-align:center;}
+
+/* AI badge */
+.ai-badge{display:inline-flex;align-items:center;gap:3px;font-size:.58rem;font-weight:700;padding:2px 7px;border-radius:5px;background:rgba(168,85,247,.15);border:1px solid rgba(168,85,247,.3);color:#d8b4fe;margin-top:3px;}
+
+/* heatmap */
+.hm{display:flex;gap:5px;padding:9px 13px 5px;}
+.hc{flex:1;border-radius:7px;padding:5px 3px;text-align:center;}
+.hc.CALL{background:rgba(0,255,135,.1);border:1px solid rgba(0,255,135,.18);}
+.hc.PUT{background:rgba(255,45,85,.1);border:1px solid rgba(255,45,85,.18);}
+.hc.NONE{background:var(--card);border:1px solid var(--b);}
+.htf{font-size:.58rem;color:var(--t2);font-weight:700;letter-spacing:.4px;}
+.hdir{font-size:.72rem;margin-top:2px;}
+.hc.CALL .hdir{color:var(--g);}
+.hc.PUT .hdir{color:var(--r);}
+.hc.NONE .hdir{color:var(--t3);}
+.hsc{font-size:.56rem;color:var(--t2);margin-top:1px;}
+
+/* chop indicator */
+.chop-row{display:flex;gap:5px;padding:0 13px 6px;align-items:center;}
+.chop-label{font-size:.58rem;color:var(--t2);}
+.chop-bar{flex:1;height:4px;border-radius:2px;background:var(--card2);overflow:hidden;}
+.chop-fill{height:100%;border-radius:2px;transition:width .4s;}
+
+/* reasons */
+.rstrip{display:flex;gap:5px;padding:0 13px 7px;overflow-x:auto;scrollbar-width:none;}
+.rstrip::-webkit-scrollbar{display:none;}
+.rtag{flex-shrink:0;font-size:.6rem;padding:3px 7px;border-radius:5px;background:var(--card2);border:1px solid var(--b);color:var(--t2);white-space:nowrap;}
+
+/* bottom */
+.sc-bot{display:flex;align-items:center;gap:7px;padding:6px 13px 11px;border-top:1px solid var(--b);margin-top:3px;}
+.exp{font-size:.68rem;color:var(--t2);}
+.expv{font-weight:800;color:var(--cyan);font-size:.76rem;}
+.kelly-tag{font-size:.6rem;color:var(--orange);font-weight:700;}
+.wr-tag{font-size:.6rem;color:var(--t2);}
+.ow{margin-left:auto;display:flex;gap:5px;}
+.bw,.bl{padding:5px 11px;border-radius:7px;border:none;cursor:pointer;font-size:.68rem;font-weight:800;transition:transform .1s;}
+.bw:active,.bl:active{transform:scale(.93);}
+.bw{background:rgba(0,255,135,.12);color:var(--g);border:1px solid rgba(0,255,135,.28);}
+.bl{background:rgba(255,45,85,.12);color:var(--r);border:1px solid rgba(255,45,85,.28);}
+.ores{padding:5px 11px;border-radius:7px;font-size:.7rem;font-weight:800;}
+.ores.WIN{background:rgba(0,255,135,.1);color:var(--g);}
+.ores.LOSS{background:rgba(255,45,85,.1);color:var(--r);}
+
+/* ── EMPTY STATE ── */
+.empty{text-align:center;padding:56px 20px;}
+.empty-i{font-size:3.2rem;margin-bottom:12px;}
+.empty-t{font-size:1rem;font-weight:700;margin-bottom:6px;}
+.empty-s{font-size:.78rem;color:var(--t2);line-height:1.55;}
+
+/* ── STATS TAB ── */
+.sg{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:12px 16px;}
+.sc2{background:var(--card);border:1px solid var(--b);border-radius:var(--rad);padding:14px;text-align:center;}
+.sv{font-size:2rem;font-weight:900;line-height:1;letter-spacing:-1px;}
+.sl{font-size:.6rem;color:var(--t2);text-transform:uppercase;letter-spacing:1px;margin-top:4px;}
+.wcard{margin:0 16px 10px;background:var(--card);border:1px solid var(--b);border-radius:var(--rad);padding:14px;}
+.wlabel{display:flex;justify-content:space-between;font-size:.73rem;color:var(--t2);margin-bottom:7px;}
+.wtrack{background:rgba(255,45,85,.25);border-radius:99px;height:9px;overflow:hidden;}
+.wfill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--g2),var(--g));transition:width .7s;}
+.ritem{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:9px;background:var(--card);border:1px solid var(--b);margin:0 16px 6px;font-size:.76rem;}
+.rdir{font-weight:800;font-size:.78rem;}
+.rdir.CALL{color:var(--g);}
+.rdir.PUT{color:var(--r);}
+.rsym{font-weight:700;}
+.rout{margin-left:auto;font-size:.68rem;font-weight:700;}
+.rout.WIN{color:var(--g);}
+.rout.LOSS{color:var(--r);}
+.rout.p{color:var(--t3);}
+.rai{font-size:.6rem;color:var(--purple);margin-left:4px;}
+
+/* ── CONFIG TAB ── */
+.ccard{background:var(--card);border:1px solid var(--b);border-radius:var(--rad);overflow:hidden;margin:0 0 11px;}
+.crow{display:flex;align-items:center;justify-content:space-between;padding:12px 13px;border-bottom:1px solid var(--b);}
+.crow:last-child{border-bottom:none;}
+.clbl{font-size:.8rem;font-weight:600;}
+.cval{font-size:.72rem;color:var(--t2);}
+.ctog{width:40px;height:22px;border-radius:99px;background:var(--t3);position:relative;cursor:pointer;transition:background .2s;flex-shrink:0;}
+.ctog.on{background:var(--g);}
+.ctog::after{content:'';position:absolute;width:16px;height:16px;background:#fff;border-radius:50%;top:3px;left:3px;transition:left .2s;}
+.ctog.on::after{left:21px;}
+.agrid{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 12px;}
+.atag{padding:5px 11px;border-radius:7px;background:var(--card2);border:1px solid var(--b);font-size:.7rem;font-weight:600;color:var(--t2);}
+.atag.sel{background:rgba(77,159,255,.12);border-color:rgba(77,159,255,.35);color:var(--blue);}
+
+/* Ollama status card */
+.ollama-card{margin:0 0 11px;background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.25);border-radius:var(--rad);padding:13px;}
+.ollama-header{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.ollama-title{font-size:.82rem;font-weight:700;color:#d8b4fe;}
+.ollama-sub{font-size:.7rem;color:var(--t2);line-height:1.5;}
+
+/* ── BOTTOM NAV ── */
+.bnav{flex-shrink:0;display:flex;background:rgba(11,16,32,.96);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid var(--b);padding-bottom:calc(8px + var(--safe));padding-top:8px;z-index:50;}
+.ni{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;-webkit-user-select:none;user-select:none;position:relative;}
+.ni-icon{font-size:1.25rem;transition:transform .2s;}
+.ni-lbl{font-size:.58rem;font-weight:700;letter-spacing:.2px;color:var(--t3);transition:color .2s;}
+.ni.on .ni-lbl{color:var(--gold);}
+.ni.on .ni-icon{transform:scale(1.1);filter:drop-shadow(0 0 6px var(--gold));}
+.nbadge{position:absolute;top:2px;right:calc(50% - 18px);min-width:15px;height:15px;border-radius:99px;background:var(--r);color:#fff;font-size:.56rem;font-weight:900;display:none;align-items:center;justify-content:center;padding:0 4px;border:1.5px solid var(--bg);}
+.nbadge.show{display:flex;}
+
+/* ── FAB ── */
+.fab{position:fixed;bottom:calc(var(--nav) + var(--safe) + 14px);right:16px;width:50px;height:50px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--cyan));border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.2rem;box-shadow:0 4px 18px rgba(77,159,255,.4);transition:transform .15s;z-index:40;}
+.fab:active{transform:scale(.91);}
+.fab.spin{animation:glow 1.5s ease-in-out infinite;}
+@keyframes glow{0%,100%{box-shadow:0 4px 18px rgba(77,159,255,.4)}50%{box-shadow:0 4px 32px rgba(0,229,255,.7)}}
+
+/* ── TOAST ── */
+.toast{position:fixed;top:calc(env(safe-area-inset-top,0px) + 62px);left:50%;transform:translateX(-50%) translateY(-16px);opacity:0;background:var(--card2);backdrop-filter:blur(18px);border:1px solid var(--b2);border-radius:12px;padding:9px 16px;font-size:.76rem;font-weight:600;color:var(--t);white-space:nowrap;z-index:999;transition:all .28s;pointer-events:none;}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+/* section header */
+.sh{display:flex;align-items:center;justify-content:space-between;padding:9px 16px 5px;}
+.sh-t{font-size:.8rem;font-weight:700;}
+.sh-s{font-size:.68rem;color:var(--t2);}
+
+/* ── TABLET / DESKTOP ── */
+@media(min-width:640px){
+  #slist{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:6px 20px 20px;}
+  .sel-sec,.cat,.sh{padding-left:20px;padding-right:20px;}
+  .sbar{margin:0 20px;}
+}
+@media(min-width:1024px){
+  #slist{grid-template-columns:repeat(3,1fr);}
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="hdr-row">
+    <div class="logo">
+      <div class="logo-ico">📊</div>
+      <div class="logo-txt">Pulso <b>BO Scanner</b></div>
+    </div>
+    <div class="hdr-right">
+      <div class="pill"><div class="dot" id="dot"></div><span id="ltxt">Conectando</span></div>
+      <div class="ico-btn" title="Ollama AI" id="ai-btn">🤖<div class="ai-dot" id="ai-dot"></div></div>
+      <div class="ico-btn" onclick="switchTab('config')">🔔</div>
+    </div>
+  </div>
+
+  <!-- MARKET TOGGLE -->
+  <div class="sel-sec">
+    <div class="mkt-toggle">
+      <button class="mkt-btn real" id="b-real" onclick="setMarket('REAL')">🌐 Mercado Real <span class="mkt-tag">L–V</span></button>
+      <button class="mkt-btn" id="b-otc"  onclick="setMarket('OTC')">🕐 OTC <span class="mkt-tag">24/7</span></button>
+    </div>
+    <div class="bk-scroll" id="bkrow"></div>
+  </div>
+</div>
+
+<!-- CATEGORIES -->
+<div class="cat" id="cats">
+  <span class="chip on" data-c="all"      onclick="setCat(this)">Todos</span>
+  <span class="chip"    data-c="forex"    onclick="setCat(this)">💱 Forex</span>
+  <span class="chip"    data-c="crypto"   onclick="setCat(this)">₿ Crypto</span>
+  <span class="chip"    data-c="commodity"onclick="setCat(this)">🥇 Commodities</span>
+  <span class="chip"    data-c="index"    onclick="setCat(this)">📈 Índices</span>
+  <span class="chip"    data-c="otc"      onclick="setCat(this)">🕐 OTC</span>
+</div>
+
+<!-- SCAN BAR -->
+<div class="sbar" id="sbar"><div class="sbar-fill"></div></div>
+
+<!-- SCROLL AREA -->
+<div class="scroll">
+
+  <!-- SEÑALES -->
+  <div class="page on" id="pg-signals">
+    <div class="sh"><span class="sh-t">Señales en vivo</span><span class="sh-s" id="sigcount">0</span></div>
+    <div id="slist">
+      <div style="grid-column:1/-1">
+        <div class="empty"><div class="empty-i">📡</div>
+          <div class="empty-t">Esperando señales</div>
+          <div class="empty-s">Scanner analiza cada 60s.<br>Selecciona broker y tipo de mercado arriba.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="page" id="pg-stats">
+    <div class="sg">
+      <div class="sc2"><div class="sv" id="st-t">—</div><div class="sl">Total</div></div>
+      <div class="sc2"><div class="sv" style="color:var(--g)" id="st-w">—</div><div class="sl">Win Rate</div></div>
+      <div class="sc2"><div class="sv" style="color:var(--g)" id="st-wi">—</div><div class="sl">Ganadoras</div></div>
+      <div class="sc2"><div class="sv" style="color:var(--r)" id="st-lo">—</div><div class="sl">Perdedoras</div></div>
+    </div>
+    <div class="wcard">
+      <div class="wlabel"><span>Win Rate histórico</span><span id="wlr">— / —</span></div>
+      <div class="wtrack"><div class="wfill" id="wfill" style="width:0%"></div></div>
+    </div>
+    <div class="sh" style="padding-top:4px;"><span class="sh-t">Últimas señales</span></div>
+    <div id="recent"></div>
+  </div>
+
+  <!-- CONFIG -->
+  <div class="page" id="pg-config">
+    <div style="padding:14px 16px 0;">
+
+      <div class="ollama-card" id="ollama-card">
+        <div class="ollama-header"><span>🤖</span><span class="ollama-title">Ollama AI</span><span id="oll-status" style="margin-left:auto;font-size:.68rem;color:var(--t3);">Verificando…</span></div>
+        <div class="ollama-sub" id="oll-info">El validador de IA analiza cada señal antes de enviarla. Instala Ollama y descarga un modelo para activarlo.</div>
+      </div>
+
+      <div style="font-size:.65rem;color:var(--t2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;font-weight:700;">Brokers</div>
+      <div class="ccard" id="cfg-brokers"></div>
+
+      <div style="font-size:.65rem;color:var(--t2);text-transform:uppercase;letter-spacing:1px;margin:12px 0 8px;font-weight:700;">Opciones</div>
+      <div class="ccard">
+        <div class="crow"><span class="clbl">Notificaciones</span><div class="ctog" id="notif-tog" onclick="toggleNotif()"></div></div>
+        <div class="crow"><span class="clbl">Telegram</span><span class="cval" id="tg-st">—</span></div>
+        <div class="crow"><span class="clbl">Intervalo scan</span><span class="cval" id="ci">60s</span></div>
+        <div class="crow"><span class="clbl">Payout mínimo</span><span class="cval" id="mp">80%</span></div>
+        <div class="crow"><span class="clbl">Score mínimo</span><span class="cval">78 / 100</span></div>
+      </div>
+
+      <div style="font-size:.65rem;color:var(--t2);text-transform:uppercase;letter-spacing:1px;margin:4px 0 8px;font-weight:700;">Activos disponibles</div>
+    </div>
+    <div class="agrid" id="agrid"><span style="font-size:.73rem;color:var(--t2)">Cargando…</span></div>
+  </div>
+
+</div><!-- scroll -->
+
+<button class="fab" id="fab" onclick="refresh()">🔍</button>
+
+<!-- BOTTOM NAV -->
+<nav class="bnav">
+  <div class="ni on" id="ni-signals" onclick="switchTab('signals')">
+    <div class="ni-icon">📡</div><div class="ni-lbl">Señales</div>
+    <div class="nbadge" id="nbadge">0</div>
+  </div>
+  <div class="ni" id="ni-stats" onclick="switchTab('stats')">
+    <div class="ni-icon">📊</div><div class="ni-lbl">Stats</div>
+  </div>
+  <div class="ni" id="ni-config" onclick="switchTab('config')">
+    <div class="ni-icon">⚙️</div><div class="ni-lbl">Config</div>
+  </div>
+</nav>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = location.origin;
+const WS  = (location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/ws';
+
+let ws, sigs=[], cat='all', mkt='REAL', broker='demo', brokers=[], newCnt=0, notifOn=false, ollamaOn=false;
+
+// ── WebSocket ──────────────────────────────────────────────
+function conn(){
+  ws = new WebSocket(WS);
+  ws.onopen = ()=>{
+    setLive('on');
+    loadStatus(); loadStats();
+    setInterval(()=>{ if(ws.readyState===1) ws.send('ping'); },25000);
+  };
+  ws.onmessage = ({data})=>{
+    const m = JSON.parse(data);
+    if(m.type==='init'){
+      sigs=m.signals||[]; mkt=m.market_type||'REAL';
+      broker=m.broker||'demo'; ollamaOn=m.ollama||false;
+      syncMkt(); render(); updateAIBadge();
+    } else if(m.type==='signal'){
+      sigs.unshift(m.data); if(sigs.length>100)sigs.pop();
+      render(); loadStats(); bump(); notify(m.data);
+    } else if(m.type==='scan_start'){
+      setLive('scan');
+      document.getElementById('sbar').classList.add('active');
+      document.getElementById('fab').classList.add('spin');
+    } else if(m.type==='scan_done'){
+      setLive('on');
+      document.getElementById('sbar').classList.remove('active');
+      document.getElementById('fab').classList.remove('spin');
+    } else if(m.type==='config_changed'){
+      mkt=m.market_type; broker=m.broker; syncMkt(); renderBrokers();
+      toast('✅ '+broker.toUpperCase()+' · '+mkt);
+    }
+  };
+  ws.onclose = ()=>{ setLive('off'); setTimeout(conn,3000); };
+  ws.onerror = ()=>ws.close();
+}
+
+// ── Live dot ───────────────────────────────────────────────
+function setLive(s){
+  const d=document.getElementById('dot'), t=document.getElementById('ltxt');
+  d.className='dot';
+  if(s==='on')  { t.textContent='En vivo'; }
+  if(s==='scan'){ d.classList.add('scan'); t.textContent='Escaneando…'; }
+  if(s==='off') { d.classList.add('off');  t.textContent='Reconectando'; }
+}
+
+function updateAIBadge(){
+  document.getElementById('ai-dot').className='ai-dot'+(ollamaOn?' on':'');
+  document.getElementById('oll-status').textContent = ollamaOn ? '✅ Activo' : '⭕ Sin Ollama';
+  document.getElementById('oll-status').style.color = ollamaOn ? 'var(--g)' : 'var(--t3)';
+}
+
+// ── Status / brokers ───────────────────────────────────────
+async function loadStatus(){
+  try{
+    const d = await (await fetch(API+'/api/status')).json();
+    brokers=d.brokers||[]; broker=d.active_broker; mkt=d.market_type;
+    ollamaOn=d.ollama||false; syncMkt(); renderBrokers(); updateAIBadge();
+    document.getElementById('ci').textContent = (d.scan_interval||60)+'s';
+    document.getElementById('mp').textContent = (d.min_payout||80)+'%';
+    document.getElementById('tg-st').textContent = d.ollama_model||'—';
+  }catch(e){}
+}
+
+function renderBrokers(){
+  document.getElementById('bkrow').innerHTML = brokers.map(b=>`
+    <div class="bk-pill ${b.id===broker?'active':''}"
+         onclick="setBroker('${b.id}')"
+         style="${b.id===broker?`border-color:${b.color};color:${b.color};background:${b.color}14;`:''}">
+      <div class="bk-dot ${b.connected?'on':''}"></div>${b.label}
+    </div>`).join('');
+}
+
+async function setBroker(id){
+  if(id===broker)return;
+  broker=id; sigs=[]; render(); renderBrokers();
+  await fetch(API+'/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({broker_id:id})});
+  loadAssets();
+}
+
+// ── Market ─────────────────────────────────────────────────
+async function setMarket(m){
+  if(m===mkt)return;
+  mkt=m; sigs=[]; render(); syncMkt();
+  await fetch(API+'/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market_type:m})});
+  loadAssets(); toast('Mercado: '+m);
+}
+
+function syncMkt(){
+  const r=document.getElementById('b-real'), o=document.getElementById('b-otc');
+  r.className='mkt-btn'+(mkt==='REAL'?' real':'');
+  o.className='mkt-btn'+(mkt==='OTC' ?' otc' :'');
+}
+
+// ── Category ───────────────────────────────────────────────
+function setCat(el){
+  document.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));
+  el.classList.add('on'); cat=el.dataset.c; render();
+}
+
+// ── Render signals ─────────────────────────────────────────
+function render(){
+  let list=sigs.filter(s=>{
+    if(cat!=='all' && s.category!==cat) return false;
+    return true;
+  });
+  document.getElementById('sigcount').textContent=list.length+' señal'+(list.length!==1?'es':'');
+  const el=document.getElementById('slist');
+  if(!list.length){
+    el.innerHTML=`<div style="grid-column:1/-1"><div class="empty">
+      <div class="empty-i">📡</div><div class="empty-t">Sin señales</div>
+      <div class="empty-s">${mkt==='OTC'?'OTC disponible 24/7 incluyendo fines de semana.':'Mercado activo Lun–Vie 06:00–22:00 UTC.'}<br>Score mínimo requerido: 78/100.</div>
+    </div></div>`;
+    return;
+  }
+  el.innerHTML=list.map(s=>card(s)).join('');
+}
+
+function card(s){
+  const sc=s.score>=80?'A':s.score>=70?'B':'C';
+  const mt=(s.market_type||'REAL').toUpperCase();
+  const tfs=(s.tf_results||[]).map(t=>{
+    const dir=t.dir||'NONE', arrow=dir==='CALL'?'▲':dir==='PUT'?'▼':'—';
+    const chop=t.chop||50;
+    const chColor=chop>61.8?'var(--r)':chop<38?'var(--g)':'var(--gold)';
+    return `<div class="hc ${dir}"><div class="htf">${t.tf}</div><div class="hdir">${arrow}</div><div class="hsc">${t.score}</div></div>`;
+  }).join('');
+
+  // Chop indicator (avg of tf_results)
+  const avgChop = s.tf_results?.length
+    ? s.tf_results.reduce((a,t)=>a+(t.chop||50),0)/s.tf_results.length : 50;
+  const chopPct = Math.min(avgChop,100);
+  const chopColor = chopPct>61.8?'var(--r)':chopPct<38?'var(--g)':'var(--gold)';
+
+  const reasons=(s.reasons||[]).slice(0,5).map(r=>
+    `<span class="rtag">${r.replace(/\[M\d+\]\s*/g,'')}</span>`).join('');
+
+  const aiBadge = s.ai_score>0
+    ? `<div class="ai-badge">🤖 AI ${s.ai_score}%</div>` : '';
+
+  const kelly = s.kelly_pct>0
+    ? `<span class="kelly-tag">Kelly ${s.kelly_pct}%</span>` : '';
+
+  const wr = s.win_rate_hist>0
+    ? `<span class="wr-tag">Hist: ${s.win_rate_hist}%</span>` : '';
+
+  const outcome = s.outcome
+    ? `<div class="ores ${s.outcome}">${s.outcome==='WIN'?'✅ WIN':'❌ LOSS'}</div>`
+    : `<div class="ow"><button class="bw" onclick="markOut(${s.id},'WIN',event)">✅</button><button class="bl" onclick="markOut(${s.id},'LOSS',event)">❌</button></div>`;
+
+  return `<div class="sc ${s.direction} glow" id="sc-${s.id}">
+    <div class="sc-top">
+      <div class="dir-pill ${s.direction}">
+        <div class="da">${s.direction==='CALL'?'▲':'▼'}</div>
+        <div class="dt">${s.direction}</div>
+      </div>
+      <div class="sc-info">
+        <div class="sc-sym">${s.symbol}</div>
+        <div class="sc-meta">
+          <span class="mbadge ${mt}">${mt}</span>
+          <span class="mtag">⏱ ${s.expiration}min</span>
+          <span class="mtag">🕐 ${ago(s.timestamp)}</span>
+        </div>
+        <div class="sc-meta" style="margin-top:2px;">
+          <span class="bktag">${s.broker}</span>
+          ${aiBadge}
+        </div>
+      </div>
+      <div class="sw">
+        <div class="sring ${sc}">${s.score}</div>
+        <div class="ptag">${s.payout}%</div>
+      </div>
+    </div>
+
+    <div class="hm">${tfs}</div>
+
+    <div class="chop-row">
+      <span class="chop-label">Mercado:</span>
+      <div class="chop-bar"><div class="chop-fill" style="width:${chopPct}%;background:${chopColor}"></div></div>
+      <span style="font-size:.58rem;color:${chopColor};font-weight:700;min-width:36px;text-align:right;">
+        ${chopPct>61.8?'Lateral':chopPct<38?'Tendencia':'Mixto'}
+      </span>
+    </div>
+
+    <div class="rstrip">${reasons}</div>
+
+    <div class="sc-bot">
+      <span class="exp">Exp <span class="expv">${s.expiration}m</span></span>
+      ${kelly}${wr}
+      ${outcome}
+    </div>
+  </div>`;
+}
+
+// ── Outcome ─────────────────────────────────────────────────
+async function markOut(id,outcome,ev){
+  ev.stopPropagation();
+  await fetch(API+'/api/outcome',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,outcome})});
+  const s=sigs.find(x=>x.id===id); if(s) s.outcome=outcome;
+  render(); loadStats();
+}
+
+// ── Stats ──────────────────────────────────────────────────
+async function loadStats(){
+  try{
+    const d=await(await fetch(API+'/api/stats')).json();
+    document.getElementById('st-t').textContent=d.total;
+    document.getElementById('st-w').textContent=d.win_rate+'%';
+    document.getElementById('st-wi').textContent=d.wins;
+    document.getElementById('st-lo').textContent=d.losses;
+    document.getElementById('wlr').textContent=`${d.wins}W / ${d.losses}L`;
+    document.getElementById('wfill').style.width=d.win_rate+'%';
+    const rc=document.getElementById('recent');
+    rc.innerHTML=(d.recent||[]).map(s=>`
+      <div class="ritem">
+        <span class="rdir ${s.direction}">${s.direction==='CALL'?'▲':'▼'}</span>
+        <span class="rsym">${s.symbol}</span>
+        <span style="font-size:.68rem;color:var(--t2)">${s.score}pts</span>
+        ${s.ai_score>0?`<span class="rai">AI ${Math.round(s.ai_score*100)}%</span>`:''}
+        <span class="rout ${s.outcome||'p'}">${s.outcome||'⏳'}</span>
+      </div>`).join('') || '<div style="padding:20px 16px;color:var(--t2);font-size:.78rem">Sin historial. Marca señales como WIN/LOSS.</div>';
+  }catch(e){}
+}
+
+// ── Assets ─────────────────────────────────────────────────
+async function loadAssets(){
+  try{
+    const d=await(await fetch(API+`/api/assets?market_type=${mkt}`)).json();
+    document.getElementById('agrid').innerHTML=d.length
+      ? d.map(a=>`<span class="atag sel">${a.symbol} <b style="color:var(--gold);font-size:.58rem">${a.payout}%</b></span>`).join('')
+      : '<span style="font-size:.73rem;color:var(--t2)">Sin activos</span>';
+  }catch(e){}
+}
+
+function renderCfgBrokers(){
+  document.getElementById('cfg-brokers').innerHTML=brokers.map(b=>`
+    <div class="crow">
+      <span class="clbl">${b.label}</span>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:.66rem;color:${b.connected?'var(--g)':'var(--t3)'}">${b.connected?'● Conectado':'○ Desconectado'}</span>
+        ${b.id===broker
+          ?`<span style="font-size:.62rem;background:rgba(255,215,0,.12);color:var(--gold);padding:2px 8px;border-radius:4px;font-weight:700">ACTIVO</span>`
+          :`<button onclick="setBroker('${b.id}')" style="font-size:.62rem;background:var(--card2);color:var(--t2);border:1px solid var(--b);padding:3px 10px;border-radius:6px;cursor:pointer">Usar</button>`}
+      </div>
+    </div>`).join('');
+}
+
+// ── Tabs ───────────────────────────────────────────────────
+function switchTab(t){
+  ['signals','stats','config'].forEach(n=>{
+    document.getElementById('pg-'+n).classList.remove('on');
+    document.getElementById('ni-'+n).classList.remove('on');
+  });
+  document.getElementById('pg-'+t).classList.add('on');
+  document.getElementById('ni-'+t).classList.add('on');
+  if(t==='signals'){ newCnt=0; document.getElementById('nbadge').classList.remove('show'); }
+  if(t==='stats')   loadStats();
+  if(t==='config'){ renderCfgBrokers(); loadAssets(); }
+}
+
+// ── Badge ──────────────────────────────────────────────────
+function bump(){
+  newCnt++;
+  const b=document.getElementById('nbadge');
+  b.textContent=newCnt; b.classList.add('show');
+  setTimeout(()=>document.querySelectorAll('.sc.glow').forEach(c=>c.classList.remove('glow')),3500);
+}
+
+// ── Refresh ────────────────────────────────────────────────
+async function refresh(){
+  toast('🔍 Actualizando…');
+  try{
+    const d=await(await fetch(API+'/api/signals')).json();
+    sigs=d; render(); loadStats();
+  }catch(e){ toast('❌ Error'); }
+}
+
+// ── Notifications ───────────────────────────────────────────
+async function toggleNotif(){
+  if(!('Notification'in window)){toast('No soportado');return;}
+  if(Notification.permission==='granted'){
+    notifOn=!notifOn;
+    document.getElementById('notif-tog').className='ctog'+(notifOn?' on':'');
+    toast(notifOn?'🔔 Notificaciones ON':'🔕 Notificaciones OFF');
+  }else{
+    const p=await Notification.requestPermission();
+    if(p==='granted'){notifOn=true;document.getElementById('notif-tog').className='ctog on';toast('🔔 Activadas');}
+  }
+}
+
+function notify(s){
+  if(!notifOn||Notification.permission!=='granted')return;
+  const ai=s.ai_score>0?` AI:${s.ai_score}%`:'';
+  new Notification(`${s.direction} ${s.symbol} — Score ${s.score}${ai}`,{
+    body:`Payout ${s.payout}% · ${s.expiration}min · ${s.market_type}\n${(s.reasons||[]).slice(0,2).join(' · ')}`,
+  });
+}
+
+// ── Toast ───────────────────────────────────────────────────
+let _tt;
+function toast(msg){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.classList.add('show');
+  clearTimeout(_tt); _tt=setTimeout(()=>el.classList.remove('show'),2400);
+}
+
+// ── Helpers ─────────────────────────────────────────────────
+function ago(ts){
+  const d=Math.floor(Date.now()/1000-ts);
+  return d<60?d+'s':d<3600?Math.floor(d/60)+'m':Math.floor(d/3600)+'h';
+}
+
+conn();
+setInterval(loadStats,30000);
+</script>
+</body>
+</html>

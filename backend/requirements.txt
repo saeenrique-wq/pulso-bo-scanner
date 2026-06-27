@@ -1,0 +1,12 @@
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+httpx>=0.27.0
+pandas>=2.2.0
+numpy>=1.26.0
+yfinance>=0.2.40
+python-dotenv>=1.0.0
+
+# Brokers reales (instalar solo lo que uses):
+# pip install pyquotex              ← Quotex
+# pip install binaryoptionstoolsv2  ← Pocket Option
+# pip install iqoptionapi           ← IQ Option / Exnova
