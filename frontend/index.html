@@ -300,25 +300,28 @@ body{display:flex;flex-direction:column;}
     </div>
   </div>
 
-  <!-- MARKET TOGGLE -->
+  <!-- INFO BAR: ambos mercados activos siempre -->
   <div style="padding:0 14px 8px;">
-    <div class="mkt-row">
-      <button class="mkt-btn real" id="b-real" onclick="setMarket('REAL')">🌐 Mercado Real <span class="mkt-tag">Lun–Vie</span></button>
-      <button class="mkt-btn" id="b-otc" onclick="setMarket('OTC')">🕐 OTC 24/7 <span class="mkt-tag">Siempre</span></button>
+    <div style="display:flex;gap:6px;margin-bottom:8px;">
+      <div style="flex:1;padding:8px 10px;border-radius:10px;background:rgba(59,130,246,.12);border:1.5px solid rgba(59,130,246,.3);display:flex;align-items:center;gap:6px;font-size:.72rem;font-weight:700;color:#93c5fd;">
+        🌐 <span>Real <span style="font-size:.6rem;opacity:.7;font-weight:400">EUR USD GBP JPY TRUMP</span></span>
+      </div>
+      <div style="flex:1;padding:8px 10px;border-radius:10px;background:rgba(139,92,246,.12);border:1.5px solid rgba(139,92,246,.3);display:flex;align-items:center;gap:6px;font-size:.72rem;font-weight:700;color:#c4b5fd;">
+        🕐 <span>OTC 24/7 <span style="font-size:.6rem;opacity:.7;font-weight:400">mismos pares</span></span>
+      </div>
     </div>
     <!-- BROKER PILLS -->
     <div class="bk-scroll" id="bkrow"></div>
   </div>
 </div>
 
-<!-- CATEGORY FILTER -->
+<!-- FILTER: mercado + tipo -->
 <div class="cat-row" id="catrow">
-  <span class="chip on" data-cat="all"        onclick="setCat(this)">Todos</span>
-  <span class="chip"    data-cat="Forex"       onclick="setCat(this)">💱 Forex</span>
-  <span class="chip"    data-cat="Crypto"      onclick="setCat(this)">₿ Crypto</span>
-  <span class="chip"    data-cat="Commodities" onclick="setCat(this)">🥇 Oro</span>
-  <span class="chip"    data-cat="Indices"     onclick="setCat(this)">📈 Índices</span>
-  <span class="chip"    data-cat="OTC"         onclick="setCat(this)">🕐 OTC</span>
+  <span class="chip on" data-mkt="all"  onclick="setMkt(this)">Todos</span>
+  <span class="chip"    data-mkt="REAL" onclick="setMkt(this)">🌐 Real</span>
+  <span class="chip"    data-mkt="OTC"  onclick="setMkt(this)">🕐 OTC</span>
+  <span class="chip"    data-mkt="__Forex"  onclick="setMkt(this)">💱 Forex</span>
+  <span class="chip"    data-mkt="__Crypto" onclick="setMkt(this)">🪙 Crypto</span>
 </div>
 
 <!-- SCAN BAR -->
@@ -421,7 +424,7 @@ const API = location.origin;
 const WS  = (location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/ws';
 
 // ── Estado global ──────────────────────────────────────────
-let ws, sigs=[], brokers=[], broker='demo', mkt='REAL', cat='all';
+let ws, sigs=[], brokers=[], broker='demo', mkt='REAL', mktFilter='all';
 let newCnt=0, notifOn=false, ollamaOn=false, scanning=false;
 
 // ── WebSocket ──────────────────────────────────────────────
@@ -552,34 +555,24 @@ async function setBroker(id){
   }catch(e){}
 }
 
-// ── Market ─────────────────────────────────────────────────
-async function setMarket(m){
-  if(m===mkt) return;
-  mkt=m; sigs=[]; render(); syncMkt();
-  try{
-    await fetch(API+'/api/config',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({market_type:m})});
-  }catch(e){}
-  toast('Mercado: '+m);
-}
-
-function syncMkt(){
-  document.getElementById('b-real').className='mkt-btn'+(mkt==='REAL'?' real':'');
-  document.getElementById('b-otc').className ='mkt-btn'+(mkt==='OTC' ?' otc' :'');
-}
-
-// ── Category filter ────────────────────────────────────────
-function setCat(el){
+// ── Filtro REAL / OTC / Forex / Crypto ─────────────────────
+function setMkt(el){
   document.querySelectorAll('#catrow .chip').forEach(c=>c.classList.remove('on'));
   el.classList.add('on');
-  cat=el.dataset.cat;
+  mktFilter = el.dataset.mkt;
   render();
 }
 
 // ── Render señales ─────────────────────────────────────────
 function render(){
-  const filtered = cat==='all' ? sigs : sigs.filter(s=>s.category===cat);
+  const filtered = sigs.filter(s=>{
+    if(mktFilter==='all') return true;
+    if(mktFilter==='REAL') return (s.market_type||'').toUpperCase()==='REAL';
+    if(mktFilter==='OTC')  return (s.market_type||'').toUpperCase()==='OTC';
+    if(mktFilter==='__Forex')  return s.category==='Forex';
+    if(mktFilter==='__Crypto') return s.category==='Crypto';
+    return true;
+  });
   const cnt = filtered.length;
   document.getElementById('sigcount').textContent=
     cnt+' señal'+(cnt!==1?'es':'');

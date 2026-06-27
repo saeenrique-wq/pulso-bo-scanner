@@ -18,7 +18,10 @@ from ai.ollama_validator import validate as ai_validate, is_available as ollama_
 from brokers.base        import BaseBroker, BrokerConfig
 from brokers.demo        import DemoBroker, QuotexBroker, PocketBroker, IQBroker
 from utils.config        import cfg
-from utils.telegram      import send as tg_send, send_martingale as tg_martingale
+
+# Telegram desactivado — señales solo por web
+async def tg_send(*a, **k):        return False
+async def tg_martingale(*a, **k):  return False
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -146,33 +149,32 @@ async def _fetch_asset(broker, asset, mt: str) -> None:
         log.warning(f"{asset.symbol}: {e}")
 
 
-async def scan_once():
+async def _scan_market(broker, mt: str):
+    """Escanea los 5 pares en un mercado (REAL u OTC)."""
     from brokers.demo import TOP5_REAL, TOP5_OTC
-    broker = S.brokers.get(S.active_broker)
-    if not broker or not broker.is_ready():
-        return
-    mt = S.market_type
     try:
         all_assets = await broker.get_assets(market_type=mt)
     except Exception as e:
-        log.warning(f"get_assets: {e}"); return
+        log.warning(f"get_assets [{mt}]: {e}"); return
 
-    filter_syms = set(cfg.ASSETS)
-    all_assets  = [a for a in all_assets
-                   if (not filter_syms or a.symbol in filter_syms)
-                   and a.payout >= cfg.MIN_PAYOUT_PCT / 100]
+    top5    = TOP5_OTC if mt == "OTC" else TOP5_REAL
+    ordered = [a for a in all_assets
+               if a.symbol in top5
+               and a.payout >= cfg.MIN_PAYOUT_PCT / 100]
 
-    # SOLO los 5 pares más operados en BO — nada más
-    top5 = TOP5_OTC if mt == "OTC" else TOP5_REAL
-    ordered = [a for a in all_assets if a.symbol in top5]
+    log.info(f"Escaneando [{mt}]: {[a.symbol for a in ordered]}")
+    await asyncio.gather(*[_fetch_asset(broker, a, mt) for a in ordered])
 
-    log.info(f"Escaneando Top5 [{mt}]: {[a.symbol for a in ordered]}")
 
-    # Descarga los 5 en paralelo (M1+M5+M15 de cada uno simultáneamente)
-    batch_size = 5
-    for i in range(0, len(ordered), batch_size):
-        batch = ordered[i:i+batch_size]
-        await asyncio.gather(*[_fetch_asset(broker, a, mt) for a in batch])
+async def scan_once():
+    """Escanea REAL y OTC en paralelo — siempre los dos mercados."""
+    broker = S.brokers.get(S.active_broker)
+    if not broker or not broker.is_ready():
+        return
+    await asyncio.gather(
+        _scan_market(broker, "REAL"),
+        _scan_market(broker, "OTC"),
+    )
 
 
 async def scanner_loop():
@@ -181,7 +183,7 @@ async def scanner_loop():
         broker = S.brokers.get(S.active_broker)
         if broker and broker.is_ready():
             await broadcast({"type":"scan_start","ts":time.time(),
-                             "broker":broker.name,"market":S.market_type})
+                             "broker":broker.name,"market":"REAL+OTC"})
             await scan_once()
             await broadcast({"type":"scan_done","ts":time.time()})
         await asyncio.sleep(cfg.SCAN_INTERVAL)
