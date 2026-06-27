@@ -294,11 +294,13 @@ body{display:flex;flex-direction:column;}
 .fab:active{transform:scale(.9);}
 .fab.spin{animation:fabglow 1.5s ease-in-out infinite;}
 @keyframes fabglow{0%,100%{box-shadow:0 4px 16px rgba(77,159,255,.4)}50%{box-shadow:0 4px 28px rgba(0,229,255,.7)}}
-.fab-reset{position:fixed;bottom:calc(var(--nav) + var(--safe) + 70px);right:14px;
-  width:38px;height:38px;border-radius:50%;background:rgba(255,45,85,.15);
-  border:1.5px solid rgba(255,45,85,.3);cursor:pointer;display:flex;align-items:center;
-  justify-content:center;font-size:.9rem;color:var(--r);z-index:40;transition:all .12s;}
-.fab-reset:active{transform:scale(.9);background:rgba(255,45,85,.3);}
+.btn-danger{width:100%;padding:13px;border-radius:10px;
+  background:rgba(255,45,85,.1);border:1.5px solid rgba(255,45,85,.3);
+  color:var(--r);font-size:.8rem;font-weight:800;cursor:pointer;letter-spacing:.3px;
+  transition:all .18s;}
+.btn-danger:active{background:rgba(255,45,85,.25);}
+.btn-danger.confirm-mode{background:rgba(255,45,85,.25);border-color:rgba(255,45,85,.6);
+  animation:pulse-entry .5s infinite alternate;}
 
 /* ── SECTION HEADER ──────────────────────────────────────── */
 .sh{display:flex;align-items:center;justify-content:space-between;padding:6px 14px 4px;}
@@ -395,6 +397,9 @@ body{display:flex;flex-direction:column;}
     </div>
     <div class="sh"><span class="sh-t">Historial reciente</span></div>
     <div id="recent-list"></div>
+    <div style="padding:12px 14px 4px;">
+      <button class="btn-danger" id="btn-borrar" onclick="resetSignals()">🗑 Borrar todo el historial</button>
+    </div>
   </div>
 
   <!-- CONFIG -->
@@ -436,7 +441,6 @@ body{display:flex;flex-direction:column;}
 </div><!-- /scroll -->
 
 <button class="fab" id="fab" onclick="doScan()">🔍</button>
-<button class="fab-reset" id="fabreset" onclick="resetSignals()" title="Borrar historial">🗑</button>
 
 <!-- BOTTOM NAV -->
 <nav class="bnav">
@@ -498,8 +502,11 @@ function connect(){
       toast('✅ '+broker.toUpperCase()+' · '+mkt);
     }
     else if(m.type==='outcome'){
-      const s=sigs.find(x=>x.id===m.id);
-      if(s){ s.outcome=m.outcome; render(); }
+      sigs = sigs.filter(x => x.id !== m.id);
+      render(); loadStats();
+    }
+    else if(m.type==='reset'){
+      sigs=[]; render(); loadStats(); toast('🗑 Historial borrado');
     }
     else if(m.type==='martingale'){
       const lv=m.level;
@@ -704,16 +711,19 @@ function sigCard(s){
   </div>`;
 }
 
-// ── Mark outcome ───────────────────────────────────────────
+// ── Mark outcome → señal se mueve al historial ─────────────
 async function markOut(id, outcome, ev){
   if(ev) ev.stopPropagation();
   try{
     await fetch(API+'/api/outcome',{method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({id,outcome})});
-    const s=sigs.find(x=>x.id==id);
-    if(s){ s.outcome=outcome; render(); loadStats(); }
-  }catch(e){ toast('❌ Error'); }
+    // Quitar de la lista activa — ahora vive en el historial (Stats)
+    sigs = sigs.filter(x => String(x.id) !== String(id));
+    render();
+    loadStats();
+    toast(outcome==='WIN' ? '✅ Ganada — enviada al historial' : '❌ Perdida — enviada al historial');
+  }catch(e){ toast('❌ Error al registrar resultado'); }
 }
 
 // ── Stats ──────────────────────────────────────────────────
@@ -727,15 +737,16 @@ async function loadStats(){
     document.getElementById('wlr').textContent=`${d.wins}W / ${d.losses}L`;
     document.getElementById('wr-fill').style.width=(d.win_rate||0)+'%';
     const rl=document.getElementById('recent-list');
-    rl.innerHTML=(d.recent||[]).map(s=>`
+    const items=(d.recent||[]).filter(s=>s.outcome);
+    rl.innerHTML=items.map(s=>`
       <div class="recent-item">
         <span class="r-dir ${s.direction}">${s.direction==='CALL'?'▲':'▼'}</span>
-        <span class="r-sym">${s.symbol}</span>
-        <span style="font-size:.65rem;color:var(--t2)">${s.score}pts</span>
-        ${s.ai_score>0?`<span style="font-size:.6rem;color:var(--purple)">AI ${Math.round(s.ai_score*100)}%</span>`:''}
-        <span class="r-out ${s.outcome||'p'}">${s.outcome||'⏳'}</span>
+        <span class="r-sym">${(s.symbol||'').replace('-OTC',' OTC')}</span>
+        <span style="font-size:.62rem;color:var(--t2)">${s.market_type==='OTC'?'OTC':'Real'}</span>
+        ${s.score?`<span style="font-size:.6rem;color:var(--t2)">${s.score}pts</span>`:''}
+        <span class="r-out ${s.outcome}">${s.outcome==='WIN'?'✅ WIN':'❌ LOSS'}</span>
       </div>`).join('') || `<div style="padding:16px 14px;color:var(--t2);font-size:.76rem">
-        Sin historial. Marca señales como ✅ WIN o ❌ LOSS.</div>`;
+        Sin historial. Las señales aparecen aquí cuando las marcas como WIN o LOSS.</div>`;
   }catch(e){}
 }
 
@@ -865,13 +876,27 @@ function tickTimers(){
   });
 }
 
-// ── Reset historial ────────────────────────────────────────
+// ── Reset historial — doble toque para confirmar ───────────
+let _resetTimer = null;
 async function resetSignals(){
-  if(!confirm('Borrar todo el historial de señales?')) return;
-  try{
-    await fetch(API+'/api/signals/reset',{method:'POST'});
-    sigs=[]; render(); toast('Historial borrado');
-  }catch(e){ toast('Error al borrar'); }
+  const btn = document.getElementById('btn-borrar');
+  if(_resetTimer){
+    // Segundo toque: ejecutar
+    clearTimeout(_resetTimer); _resetTimer = null;
+    if(btn){ btn.classList.remove('confirm-mode'); btn.textContent='🗑 Borrar todo el historial'; }
+    try{
+      await fetch(API+'/api/signals/reset',{method:'POST'});
+      sigs=[]; render(); loadStats(); toast('🗑 Historial borrado');
+    }catch(e){ toast('❌ Error al borrar'); }
+    return;
+  }
+  // Primer toque: pedir confirmación
+  _resetTimer = setTimeout(()=>{
+    _resetTimer = null;
+    if(btn){ btn.classList.remove('confirm-mode'); btn.textContent='🗑 Borrar todo el historial'; }
+  }, 3000);
+  if(btn){ btn.classList.add('confirm-mode'); btn.textContent='⚠️ Toca de nuevo para confirmar'; }
+  toast('⚠️ Toca el botón de nuevo para confirmar');
 }
 
 // ── INIT ───────────────────────────────────────────────────
