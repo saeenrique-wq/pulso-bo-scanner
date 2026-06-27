@@ -137,6 +137,16 @@ async def _fetch_asset(broker, asset, mt: str) -> None:
         else:
             sig.ai_score = 0.0
 
+        # Dedup final: no emitir si ya hay señal pendiente del mismo par+dirección
+        already = any(
+            x.get("symbol") == sig.symbol and
+            x.get("direction") == sig.direction and
+            x.get("outcome") is None
+            for x in S.signals
+        )
+        if already:
+            log.debug(f"Dedup en memoria: {sig.symbol} {sig.direction} ya pendiente"); return
+
         sig.win_rate_hist = wr
         sid = save_sig(sig)
         d   = sig.to_dict(); d["id"] = sid

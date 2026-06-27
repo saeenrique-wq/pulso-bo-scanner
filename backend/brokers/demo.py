@@ -70,6 +70,17 @@ class DemoBroker(BaseBroker):
             )
             if df.empty:
                 return []
+
+            # Bloquear datos obsoletos: si el último dato tiene más de 2h
+            # el mercado está cerrado (fin de semana o fuera de horario)
+            last_ts = df.index[-1]
+            try:
+                last_unix = int(pd.Timestamp(last_ts).timestamp())
+            except Exception:
+                last_unix = 0
+            if last_unix > 0 and (pd.Timestamp.utcnow().timestamp() - last_unix) > 7200:
+                return []   # datos obsoletos — no generar señal
+
             df = df.tail(count)
 
             def _v(cell, d=0.0):

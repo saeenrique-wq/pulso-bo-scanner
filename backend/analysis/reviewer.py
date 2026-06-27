@@ -4,10 +4,10 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone
 
-MIN_SCORE     = 22
+MIN_SCORE     = 32
 MIN_PAYOUT    = 0.80
-COOLDOWN_S    = 90
-MAX_DAY_ASSET = 20
+COOLDOWN_S    = 300   # 5 min — mismo símbolo+dirección no repite antes de que la vela anterior expire
+MAX_DAY_ASSET = 12    # máximo 12 señales/par/día (evita spam)
 
 # Horario REAL forex (UTC): Lun 00:00 – Vie 21:00
 # Fuera de ese horario, los pares REAL no tienen liquidez — solo OTC opera 24/7
@@ -31,8 +31,14 @@ def _market_open(market_type: str) -> tuple[bool, str]:
 
 class SignalReviewer:
     def __init__(self):
-        self._last:  dict[tuple, float] = {}
-        self._daily: dict[tuple, int]   = defaultdict(int)
+        self._last:      dict[tuple, float] = {}   # (sym, dir) → timestamp
+        self._last_hash: dict[tuple, str]   = {}   # (sym, dir) → hash de razones
+        self._daily:     dict[tuple, int]   = defaultdict(int)
+
+    def _reason_hash(self, sig) -> str:
+        """Huella del patrón — mismas razones = misma vela analizada."""
+        reasons = sorted(r for r in (sig.reasons or []) if 'Patron' in r or 'Pullback' in r)
+        return '|'.join(reasons) if reasons else ''
 
     def review(self, sig) -> tuple[bool, str]:
         if sig.score < MIN_SCORE:
@@ -46,15 +52,27 @@ class SignalReviewer:
 
         key = (sig.symbol, sig.direction)
         now = time.time()
-        if now - self._last.get(key, 0) < COOLDOWN_S:
-            rem = int(COOLDOWN_S - (now - self._last[key]))
+
+        # ── Cooldown temporal ──────────────────────────────────
+        elapsed = now - self._last.get(key, 0)
+        if elapsed < COOLDOWN_S:
+            rem = int(COOLDOWN_S - elapsed)
             return False, f"Cooldown {rem}s"
 
+        # ── Dedup por contenido: mismo patrón = misma vela ────
+        new_hash = self._reason_hash(sig)
+        if new_hash and new_hash == self._last_hash.get(key, ''):
+            # Extiende el cooldown 5 min más para evitar loops en datos estáticos
+            self._last[key] = now
+            return False, "Patron identico a senial anterior — datos sin cambios"
+
+        # ── Cap diario ─────────────────────────────────────────
         date = datetime.utcnow().strftime("%Y-%m-%d")
         dkey = (sig.symbol, date)
         if self._daily[dkey] >= MAX_DAY_ASSET:
             return False, f"Cap diario {MAX_DAY_ASSET} para {sig.symbol}"
 
-        self._last[key] = now
-        self._daily[dkey] += 1
+        self._last[key]      = now
+        self._last_hash[key] = new_hash
+        self._daily[dkey]   += 1
         return True, "OK"
