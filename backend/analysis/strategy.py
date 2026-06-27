@@ -138,11 +138,6 @@ def _analyze_m1(df: pd.DataFrame) -> TFResult:
         res.reasons = [f"Lateral CHOP={res.chop:.0f}"]
         return res
 
-    # Necesitamos algo de movimiento para M1
-    if res.volatility < 5:
-        res.reasons = ["Mercado dormido"]
-        return res
-
     score, calls, puts = 0, 0, 0
     reasons: list[str] = []
 
@@ -364,10 +359,11 @@ def _analyze_m15(df: pd.DataFrame) -> TFResult:
         else:
             puts  += 1; reasons.append(f"ADX M15 tendencia media {adx_v:.0f}")
 
-    # MACD — dirección macro
+    # MACD — dirección macro (filtro de magnitud: ignorar señales < 0.01% del precio)
     m = macd(close, 12, 26, 9)
     hist = m["hist"]
-    if len(hist) >= 2:
+    min_macd = abs(price) * 0.0001   # 0.01% del precio como mínimo
+    if len(hist) >= 2 and abs(hist.iloc[-1]) > min_macd:
         if hist.iloc[-1] > 0 and hist.iloc[-1] >= hist.iloc[-2]:
             calls += 1; score += 18; reasons.append("MACD M15 histograma positivo y creciendo")
         elif hist.iloc[-1] < 0 and hist.iloc[-1] <= hist.iloc[-2]:
@@ -377,17 +373,16 @@ def _analyze_m15(df: pd.DataFrame) -> TFResult:
         elif hist.iloc[-1] < 0:
             puts  += 1; score += 8;  reasons.append("MACD M15 negativo")
 
-    # RSI tendencia
+    # RSI M15 — solo zonas extremas (el RSI neutro no vota para no crear empates)
     r = rsi(close, 14).iloc[-1]
-    if 40 <= r <= 55:
-        # RSI en zona sana para tendencia alcista
-        calls += 1; score += 8; reasons.append(f"RSI M15 zona alcista sana {r:.0f}")
-    elif 45 <= r <= 60:
-        puts  += 1; score += 8; reasons.append(f"RSI M15 zona bajista sana {r:.0f}")
-    elif r < 35:
-        calls += 1; score += 15; reasons.append(f"RSI M15 bajo {r:.0f}")
-    elif r > 65:
-        puts  += 1; score += 15; reasons.append(f"RSI M15 alto {r:.0f}")
+    if r < 30:
+        calls += 1; score += 18; reasons.append(f"RSI M15 sobreventa {r:.0f}")
+    elif r > 70:
+        puts  += 1; score += 18; reasons.append(f"RSI M15 sobrecompra {r:.0f}")
+    elif r < 40:
+        calls += 1; score += 10; reasons.append(f"RSI M15 bajo {r:.0f}")
+    elif r > 60:
+        puts  += 1; score += 10; reasons.append(f"RSI M15 alto {r:.0f}")
 
     # Soporte / Resistencia
     sr = sr_levels(close)
@@ -443,13 +438,16 @@ def analyze(
         df = _to_df(candles_by_tf.get(tf, []))
         tf_results.append(_analyze_tf(df, tf))
 
-    # Mayoría de TF deben coincidir
+    # Mayoría de TF deben coincidir (o 1 solo si score muy alto >= 60)
     dirs = [r.direction for r in tf_results if r.direction is not None]
-    if len(dirs) < MIN_TF_AGREE:
-        return None
     calls = dirs.count("CALL")
     puts  = dirs.count("PUT")
-    if calls < MIN_TF_AGREE and puts < MIN_TF_AGREE:
+    max_dir = max(calls, puts)
+
+    best_score = max((r.score for r in tf_results), default=0)
+    need = 1 if best_score >= 60 else MIN_TF_AGREE  # 1 TF basta si muy convincente
+
+    if max_dir < need:
         return None
 
     direction: Direction = "CALL" if calls >= puts else "PUT"

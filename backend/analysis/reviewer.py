@@ -4,10 +4,10 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone
 
-MIN_SCORE    = 25   # Ollama AI hace el filtro fino — aquí solo filtramos basura total
+MIN_SCORE    = 22   # Ollama AI hace el filtro fino — aquí solo filtramos basura total
 MIN_PAYOUT   = 0.80
-COOLDOWN_S   = 180  # 3 min mismo activo+dirección
-MAX_DAY_ASSET = 12  # máx señales/activo/día
+COOLDOWN_S   = 90   # 1.5 min entre señales del mismo par+dirección
+MAX_DAY_ASSET = 20  # máx señales/activo/día
 ACTIVE_HOURS = set(range(0, 24))   # 24/7 — OTC opera incluso fines de semana
 
 

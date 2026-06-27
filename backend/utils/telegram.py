@@ -1,10 +1,10 @@
 from __future__ import annotations
-import os
 import httpx
 from datetime import datetime, timezone
+from utils.config import cfg
 
-TOKEN   = os.getenv("TELEGRAM_TOKEN", "")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+def _token():   return cfg.TELEGRAM_TOKEN
+def _chat_id(): return cfg.TELEGRAM_CHAT_ID
 
 # Nivel martingale en curso por activo: {symbol: nivel_actual}
 _mg_state: dict[str, int] = {}
@@ -16,7 +16,7 @@ async def send(signal, mg_level: int = 0) -> bool:
     """Envía señal al grupo Telegram.
     mg_level=0 = señal normal, 1/2/3 = paso martingale.
     """
-    if not TOKEN or not CHAT_ID:
+    if not _token() or not _chat_id():
         return False
 
     d = signal.direction
@@ -48,8 +48,8 @@ async def send(signal, mg_level: int = 0) -> bool:
     try:
         async with httpx.AsyncClient(timeout=10) as c:
             r = await c.post(
-                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"},
+                f"https://api.telegram.org/bot{_token()}/sendMessage",
+                json={"chat_id": _chat_id(), "text": text, "parse_mode": "Markdown"},
             )
         return r.status_code == 200
     except Exception:
@@ -58,7 +58,7 @@ async def send(signal, mg_level: int = 0) -> bool:
 
 async def send_martingale(signal, level: int) -> bool:
     """Envía alerta de martingale para señal perdida."""
-    if not TOKEN or not CHAT_ID or level > MAX_MG:
+    if not _token() or not _chat_id() or level > MAX_MG:
         return False
     if signal.win_rate_hist > 0 and signal.win_rate_hist < MIN_WR_MG:
         await _send_msg(
@@ -82,13 +82,13 @@ async def send_martingale(signal, level: int) -> bool:
 
 
 async def _send_msg(text: str) -> bool:
-    if not TOKEN or not CHAT_ID:
+    if not _token() or not _chat_id():
         return False
     try:
         async with httpx.AsyncClient(timeout=10) as c:
             r = await c.post(
-                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                json={"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown"},
+                f"https://api.telegram.org/bot{_token()}/sendMessage",
+                json={"chat_id": _chat_id(), "text": text, "parse_mode": "Markdown"},
             )
         return r.status_code == 200
     except Exception:

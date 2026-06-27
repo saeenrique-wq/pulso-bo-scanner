@@ -231,6 +231,7 @@ async def api_status():
         "min_payout":    cfg.MIN_PAYOUT_PCT,
         "ollama":        S.ollama_active,
         "ollama_model":  cfg.OLLAMA_MODEL,
+        "telegram_configured": bool(cfg.TELEGRAM_TOKEN and "tu_token" not in cfg.TELEGRAM_TOKEN),
     }
 
 
