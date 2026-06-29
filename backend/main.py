@@ -15,7 +15,7 @@ from analysis.strategy  import analyze
 from analysis.reviewer  import SignalReviewer
 from analysis.tracker   import save as save_sig, mark as mark_sig, win_rate, stats, load_recent
 from analysis.memory    import memory as sig_memory
-from ai.ollama_validator import validate as ai_validate, is_available as ollama_ok, MIN_AI_SCORE
+from ai.ollama_validator import validate as ai_validate, is_available as ollama_ok
 from brokers.base        import BaseBroker, BrokerConfig
 from brokers.connector   import BrokerConnector
 from brokers.demo        import DemoBroker, QuotexBroker, PocketBroker, IQBroker
@@ -42,6 +42,11 @@ async def lifespan(app: FastAPI):
     S.ollama_active = await ollama_ok(cfg.OLLAMA_MODEL)
     log.info(f"Ollama: {'activo' if S.ollama_active else 'no disponible'}")
     S.signals = load_recent(100)
+    # Señales sin outcome que ya expiraron no deben bloquear el dedup
+    _now = time.time()
+    for _s in S.signals:
+        if _s.get("outcome") is None and _now - _s.get("timestamp", 0) > 300:
+            _s["outcome"] = "NO_TOMADA"
     log.info(f"Historial cargado: {len(S.signals)} señales")
     task = asyncio.create_task(scanner_loop())
     watchdog = asyncio.create_task(S.connector.start_watchdog(60))
@@ -145,11 +150,14 @@ async def _fetch_asset(broker, asset, mt: str) -> None:
         else:
             sig.ai_score = 0.0
 
-        # Dedup final: no emitir si ya hay señal pendiente del mismo par+dirección
+        # Dedup final: no emitir si ya hay señal pendiente reciente del mismo par+dirección
+        # Ventana de 3 min — señales antiguas sin outcome no deben bloquear para siempre
+        _now_ts = time.time()
         already = any(
             x.get("symbol") == sig.symbol and
             x.get("direction") == sig.direction and
-            x.get("outcome") is None
+            x.get("outcome") is None and
+            _now_ts - x.get("timestamp", 0) < 180
             for x in S.signals
         )
         if already:
@@ -192,8 +200,7 @@ async def _scan_market(mt: str):
     OTC: REQUIERE broker real (Exnova/IQ/Pocket/Quotex) — NUNCA yfinance.
     REAL: usa yfinance via DemoBroker.
     """
-    from brokers.demo import TOP5_REAL, TOP5_OTC
-    from brokers.connector import OTC_TARGETS
+    from brokers.demo import TOP5_REAL
 
     broker = _broker_for(mt)
 

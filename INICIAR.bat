@@ -30,7 +30,7 @@ echo  ================================================
 echo   SCANNER ACTIVO en http://localhost:8082
 echo.
 echo   Para conectar Exnova al OTC:
-echo   -> Doble clic en CONECTAR_EXNOVA.pyw
+echo   -> Doble clic en CONECTAR_EXNOVA.bat
 echo.
 echo   Para ver URL publica del tunel:
 echo   -> Abre el archivo tunnel.log

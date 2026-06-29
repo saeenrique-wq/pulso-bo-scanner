@@ -1,12 +1,11 @@
 """Estrategia opciones binarias — Acción del Precio Pura + Pullbacks.
 
 Señal VÁLIDA requiere:
-  1. Filtro de ruido rápido (chop, cuerpo mínimo, inside-bar)
-  2. Patrón de vela PRESENTE (hammer, engulfing, pin bar, morning/evening star)
-  3. Contexto técnico alineado (S/R, EMA, oscilador de confirmación)
-  4. ≥2 TF concordando (o 1 TF con score ≥ 65)
+  1. Filtro de ruido rápido (chop, cuerpo mínimo)
+  2. Al menos 1 TF con score >= MIN_COMPOSITE (cada TF es independiente)
+  3. Indicadores alineados en la dirección dominante
 
-M1  — Reversión en extremos: patrón + BB extremo + Stoch girado
+M1  — Reversión en extremos: BB + Stoch + RSI + EMA + patrón opcional
 M5  — Pullback a EMA21: patrón al tocar EMA + MACD confirmación
 M15 — Tendencia + S/R: EMA triple + ADX + patrón de vela
 """
@@ -380,17 +379,11 @@ def _analyze_m1(df: pd.DataFrame) -> TFResult:
         puts  += 1; score += 10; reasons.append(f"Cerca resistencia M1 ({sr_dist*100:.2f}%)")
 
     # ── Decisión M1 ──────────────────────────────────────────
-    # Patrón de vela desempata; sin patrón se necesita ventaja >= 2 indicadores
+    # Dirección = mayoría de indicadores. El score filtra la calidad.
     if calls > puts:
-        if has_pattern and pat_dir == "CALL":
-            res.direction = "CALL"
-        elif calls - puts >= 2:
-            res.direction = "CALL"
+        res.direction = "CALL"
     elif puts > calls:
-        if has_pattern and pat_dir == "PUT":
-            res.direction = "PUT"
-        elif puts - calls >= 2:
-            res.direction = "PUT"
+        res.direction = "PUT"
     elif has_pattern:
         res.direction = pat_dir
 

@@ -267,7 +267,6 @@ class IQBroker(BaseBroker):
                 symbol=sym, broker=self.name, payout=payout,
                 is_open=True, market_type=market_type.upper(), category="Forex",
             ))
-        pass  # solo los 4 pares BO listados arriba
         return result
 
     async def get_candles(self, symbol: str, timeframe: int, count: int = 150) -> list[Candle]:
