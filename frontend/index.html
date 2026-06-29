@@ -545,6 +545,13 @@ function connect(){
       document.getElementById('fab').textContent='🔍';
       document.getElementById('fab').classList.remove('spin');
     }
+    else if(m.type==='otc_status' && m.status==='no_broker'){
+      showOtcBanner();
+    }
+    else if(m.type==='broker_connected' && m.broker==='iqoption'){
+      hideOtcBanner();
+      toast('🟢 Exnova conectado — OTC activo los 7 días');
+    }
     else if(m.type==='config_changed'){
       mkt=m.market_type; broker=m.broker;
       syncMkt(); renderBrokers(); render();
@@ -976,6 +983,42 @@ function toast(msg){
   const el=document.getElementById('toast');
   el.textContent=msg; el.classList.add('show');
   clearTimeout(_tt); _tt=setTimeout(()=>el.classList.remove('show'),2600);
+}
+
+// ── OTC Banner ─────────────────────────────────────────────
+function showOtcBanner(){
+  if(document.getElementById('otc-banner')) return;
+  const b = document.createElement('div');
+  b.id = 'otc-banner';
+  b.innerHTML = `
+    <div style="background:linear-gradient(135deg,rgba(255,159,0,.15),rgba(255,45,85,.12));
+         border:1px solid rgba(255,159,0,.35);border-radius:12px;padding:14px 18px;
+         margin:12px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span style="font-size:1.4rem">📡</span>
+      <div style="flex:1;min-width:180px">
+        <div style="color:#ff9f00;font-weight:700;font-size:.85rem">OTC sin broker conectado</div>
+        <div style="color:#94a3b8;font-size:.75rem;margin-top:2px">
+          Para señales OTC reales instala la extensión Chrome o conecta manualmente
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a href="http://localhost:8082/get-ssid" target="_blank"
+           style="background:rgba(255,215,0,.15);color:#ffd700;border:1px solid rgba(255,215,0,.3);
+                  border-radius:6px;padding:6px 12px;font-size:.75rem;text-decoration:none;font-weight:700">
+          🔑 Conectar Exnova
+        </a>
+        <button onclick="hideOtcBanner()"
+           style="background:rgba(255,255,255,.05);color:#64748b;border:1px solid rgba(255,255,255,.1);
+                  border-radius:6px;padding:6px 10px;font-size:.75rem;cursor:pointer">
+          ✕
+        </button>
+      </div>
+    </div>`;
+  const container = document.getElementById('signals-list') || document.body;
+  container.parentNode?.insertBefore(b, container);
+}
+function hideOtcBanner(){
+  document.getElementById('otc-banner')?.remove();
 }
 
 // ── Utils ──────────────────────────────────────────────────

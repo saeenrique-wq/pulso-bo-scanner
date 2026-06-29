@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{width:220px;background:#060912;color:#e8edf5;font-family:-apple-system,sans-serif;padding:16px}
+  h3{color:#ffd700;font-size:.9rem;margin-bottom:4px}
+  p{color:#64748b;font-size:.72rem;margin-bottom:12px}
+  .status{background:#0c1120;border:1px solid rgba(255,255,255,.1);border-radius:8px;
+          padding:10px;margin-bottom:12px;font-size:.78rem}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+  .green{background:#00ff87}.red{background:#ff2d55}.yellow{background:#ff9f00}.gray{background:#64748b}
+  button{width:100%;background:linear-gradient(135deg,#00ff87,#00c96b);color:#060912;
+         border:none;border-radius:8px;padding:10px;font-size:.85rem;font-weight:800;cursor:pointer}
+  button:active{transform:scale(.97)}
+  .hint{color:#64748b;font-size:.68rem;margin-top:10px;line-height:1.4;text-align:center}
+</style>
+</head>
+<body>
+<h3>🔌 Pulso BO Scanner</h3>
+<p>Conector automático Exnova → OTC</p>
+
+<div class="status">
+  <span class="dot gray" id="dot"></span>
+  <span id="status-text">Verificando...</span>
+</div>
+
+<button id="btn">⚡ Conectar ahora</button>
+
+<p class="hint" id="hint">Abre trade.exnova.com primero,<br>luego haz clic en Conectar.</p>
+
+<script src="popup.js"></script>
+</body>
+</html>

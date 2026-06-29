@@ -14,8 +14,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from analysis.strategy  import analyze
 from analysis.reviewer  import SignalReviewer
 from analysis.tracker   import save as save_sig, mark as mark_sig, win_rate, stats, load_recent
+from analysis.memory    import memory as sig_memory
 from ai.ollama_validator import validate as ai_validate, is_available as ollama_ok, MIN_AI_SCORE
 from brokers.base        import BaseBroker, BrokerConfig
+from brokers.connector   import BrokerConnector
 from brokers.demo        import DemoBroker, QuotexBroker, PocketBroker, IQBroker
 from utils.config        import cfg
 
@@ -34,18 +36,20 @@ async def lifespan(app: FastAPI):
     for bid, b in S.brokers.items():
         ok = await b.connect()
         log.info(f"[{bid}] {'OK' if ok else 'FAIL'}")
+        S.connector.register(bid, b)
     if S.active_broker not in S.brokers:
         S.active_broker = next(iter(S.brokers), "demo")
     S.ollama_active = await ollama_ok(cfg.OLLAMA_MODEL)
     log.info(f"Ollama: {'activo' if S.ollama_active else 'no disponible'}")
-    # Recuperar historial de señales de la BD
     S.signals = load_recent(100)
     log.info(f"Historial cargado: {len(S.signals)} señales")
     task = asyncio.create_task(scanner_loop())
+    watchdog = asyncio.create_task(S.connector.start_watchdog(60))
     yield
     # shutdown
     S.scanning = False
     task.cancel()
+    watchdog.cancel()
     for b in S.brokers.values():
         await b.disconnect()
 
@@ -81,6 +85,7 @@ class State:
     active_broker: str = "demo"
     market_type: str = "REAL"
     reviewer = SignalReviewer()
+    connector = BrokerConnector()
     clients: list[WebSocket] = []
     signals: list[dict] = []
     scanning: bool = False
@@ -124,6 +129,9 @@ async def _fetch_asset(broker, asset, mt: str) -> None:
         if sig is None:
             return
 
+        # Ajustar score con historial aprendido
+        sig.score = sig_memory.adjusted_score(sig.symbol, sig.score, sig.reasons)
+
         ok, reason = S.reviewer.review(sig)
         if not ok:
             log.debug(f"Rejected {asset.symbol}: {reason}"); return
@@ -164,43 +172,64 @@ async def _fetch_asset(broker, asset, mt: str) -> None:
 
 def _broker_for(mt: str):
     """
-    Elige el broker correcto según el mercado:
-    - OTC: prefiere IQ/Exnova (datos 24/7 del broker); si no está, usa demo
-    - REAL: usa el broker activo (normalmente demo/yfinance)
+    OTC → solo broker real (Exnova/IQ, Pocket Option, Quotex).
+         NUNCA yfinance/demo para OTC — datos falsos = señales falsas.
+    REAL → demo (yfinance) cuando no hay otro broker.
     """
-    if mt == "OTC":
-        iq = S.brokers.get("iqoption")
-        if iq and iq.is_ready():
-            return iq
+    if mt.upper() == "OTC":
+        # Prioridad: iqoption → pocketoption → quotex
+        for bid in ("iqoption", "pocketoption", "quotex"):
+            b = S.brokers.get(bid)
+            if b and b.is_ready():
+                return b
+        return None   # sin broker OTC real → no escanear
     return S.brokers.get(S.active_broker)
 
 
 async def _scan_market(mt: str):
-    """Escanea pares en un mercado. OTC incluye crypto 24/7 (fin de semana automático)."""
-    from brokers.demo import TOP5_REAL, TOP5_OTC, TOP5_CRYPTO_OTC
-    from datetime import datetime, timezone
+    """
+    Escanea un mercado completo en paralelo.
+    OTC: REQUIERE broker real (Exnova/IQ/Pocket/Quotex) — NUNCA yfinance.
+    REAL: usa yfinance via DemoBroker.
+    """
+    from brokers.demo import TOP5_REAL, TOP5_OTC
+    from brokers.connector import OTC_TARGETS
+
     broker = _broker_for(mt)
-    if not broker or not broker.is_ready():
-        log.debug(f"[{mt}] sin broker disponible"); return
-    try:
-        all_assets = await broker.get_assets(market_type=mt)
-    except Exception as e:
-        log.warning(f"get_assets [{mt}]: {e}"); return
 
-    if mt == "OTC":
-        now_utc = datetime.now(tz=timezone.utc)
-        is_weekend = now_utc.weekday() >= 5   # sab=5, dom=6
-        # Fin de semana: crypto OTC 24/7 + intentar forex OTC igual
-        # Entre semana: forex OTC + crypto siempre
-        top5 = TOP5_OTC + TOP5_CRYPTO_OTC
+    if mt.upper() == "OTC":
+        if not broker:
+            # Informar a la UI: OTC no disponible sin broker real
+            await broadcast({
+                "type": "otc_status",
+                "status": "no_broker",
+                "message": "OTC requiere conexión al broker. Instala la extensión Chrome o abre http://localhost:8082/get-ssid"
+            })
+            log.info("[OTC] Sin broker real — scan OTC omitido (no se emiten señales falsas)")
+            return
+        # Auto-descubrimiento de activos OTC disponibles
+        try:
+            all_assets = await broker.get_assets(market_type="OTC")
+        except Exception as e:
+            log.warning(f"[OTC] get_assets error: {e}"); return
+        ordered = [a for a in all_assets
+                   if a.payout >= cfg.MIN_PAYOUT_PCT / 100]
+        if not ordered:
+            log.info("[OTC] Sin activos OTC disponibles en el broker")
+            return
     else:
-        top5 = TOP5_REAL
-
-    ordered = [a for a in all_assets
-               if a.symbol in top5
-               and a.payout >= cfg.MIN_PAYOUT_PCT / 100]
+        if not broker or not broker.is_ready():
+            log.debug("[REAL] sin broker disponible"); return
+        try:
+            all_assets = await broker.get_assets(market_type="REAL")
+        except Exception as e:
+            log.warning(f"[REAL] get_assets error: {e}"); return
+        ordered = [a for a in all_assets
+                   if a.symbol in TOP5_REAL
+                   and a.payout >= cfg.MIN_PAYOUT_PCT / 100]
 
     log.info(f"Escaneando [{mt}] via {broker.name}: {[a.symbol for a in ordered]}")
+    # Análisis paralelo — todos los activos simultáneamente
     await asyncio.gather(*[_fetch_asset(broker, a, mt) for a in ordered])
 
 
@@ -433,8 +462,11 @@ async def api_set_ssid(body: dict):
         iq._api = api
         iq.config = BrokerConfig("", "", True)
         S.brokers["iqoption"] = iq
+        S.connector.register("iqoption", iq)
+        S.connector._otc_cache_ts = 0   # invalidar caché de activos
         log.info(f"[Exnova] SSID recibido via /api/set_ssid — OTC activo")
-        await broadcast({"type":"broker_connected","broker":"iqoption"})
+        await broadcast({"type":"broker_connected","broker":"iqoption",
+                         "message":"Exnova conectado — OTC activo los 7 días"})
         return {"ok": True, "message": "Exnova conectado — OTC activo 24/7"}
     except Exception as e:
         log.warning(f"[Exnova] set_ssid error: {e}")
@@ -454,12 +486,18 @@ async def api_outcome(body: dict):
 
     mark_sig(sid_int or sid, outcome)
 
-    # Buscar señal en memoria y actualizar
+    # Buscar señal en memoria y actualizar + registrar en memoria de aprendizaje
     sig_dict = None
     for s in S.signals:
         s_id = s.get("id")
         if s_id == sid or (sid_int is not None and s_id == sid_int):
             s["outcome"] = outcome
+            # Aprendizaje: ajustar pesos del par según resultado
+            if outcome in ("WIN", "LOSS"):
+                sig_memory.record_result(
+                    s.get("symbol", ""), outcome, s.get("reasons", []))
+                log.info(f"[Memory] {s.get('symbol')} → {outcome} registrado. "
+                         f"WR histórico: {sig_memory.win_rate(s.get('symbol','')):.0%}")
             if outcome == "LOSS":
                 prev_mg = s.get("mg_level", 0)
                 if prev_mg < 3:

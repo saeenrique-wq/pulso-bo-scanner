@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Pulso BO — Conector Exnova",
+  "version": "1.1",
+  "description": "Conecta automáticamente Exnova al Pulso BO Scanner cuando abres trade.exnova.com",
+  "permissions": ["cookies", "tabs", "storage"],
+  "host_permissions": [
+    "*://trade.exnova.com/*",
+    "http://localhost:8082/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Pulso BO — Conectar Exnova"
+  }
+}

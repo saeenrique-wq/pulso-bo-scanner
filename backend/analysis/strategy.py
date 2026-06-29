@@ -24,7 +24,7 @@ from .indicators import adx, bollinger, chop_index, ema, macd, rsi, stoch
 Direction = Literal["CALL", "PUT"]
 
 # ── Umbrales ───────────────────────────────────────────────
-MIN_COMPOSITE = 32    # score mínimo para emitir señal
+MIN_COMPOSITE = 65    # score mínimo interno (reviewer aplica el filtro final >= 80)
 MIN_TF_AGREE  = 2     # TF deben coincidir (salvo score ≥ 65)
 MAX_CHOP      = 60.0  # mercado lateral — descartar
 MIN_PAYOUT    = 0.80
