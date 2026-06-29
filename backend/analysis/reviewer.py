@@ -4,10 +4,10 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone
 
-MIN_SCORE     = 80    # solo señales de alta probabilidad (0-100)
+MIN_SCORE     = 42    # score mínimo para emitir señal
 MIN_PAYOUT    = 0.80
-COOLDOWN_S    = 300   # 5 min — mismo símbolo+dirección no repite antes de que la vela anterior expire
-MAX_DAY_ASSET = 8     # máximo 8 señales/par/día — con score 80 ya filtra suficiente
+COOLDOWN_S    = 60    # 1 min — permite señales M1 frecuentes
+MAX_DAY_ASSET = 20    # suficientes señales por par por día
 
 # Horario REAL forex (UTC): Lun 00:00 – Vie 21:00
 # Fuera de ese horario, los pares REAL no tienen liquidez — solo OTC opera 24/7

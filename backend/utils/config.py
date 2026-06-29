@@ -9,7 +9,7 @@ load_dotenv(Path(__file__).parent.parent.parent / ".env")
 class Cfg:
     HOST            = os.getenv("HOST", "0.0.0.0")
     PORT            = int(os.getenv("PORT", "8080"))
-    SCAN_INTERVAL   = int(os.getenv("SCAN_INTERVAL", "60"))
+    SCAN_INTERVAL   = int(os.getenv("SCAN_INTERVAL", "30"))
     ENABLED_BROKERS = [b.strip().lower() for b in os.getenv("ENABLED_BROKERS","demo").split(",") if b.strip()]
     ASSETS          = [a.strip().upper() for a in os.getenv("ASSETS","").split(",") if a.strip()]
     MIN_PAYOUT_PCT  = float(os.getenv("MIN_PAYOUT_PCT","80"))

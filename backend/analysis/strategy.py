@@ -24,8 +24,8 @@ from .indicators import adx, bollinger, chop_index, ema, macd, rsi, stoch
 Direction = Literal["CALL", "PUT"]
 
 # ── Umbrales ───────────────────────────────────────────────
-MIN_COMPOSITE = 65    # score mínimo interno (reviewer aplica el filtro final >= 80)
-MIN_TF_AGREE  = 2     # TF deben coincidir (salvo score ≥ 65)
+MIN_COMPOSITE = 38    # score mínimo interno para emitir señal
+MIN_TF_AGREE  = 1     # 1 TF es suficiente para señal (más señales M1/M5)
 MAX_CHOP      = 60.0  # mercado lateral — descartar
 MIN_PAYOUT    = 0.80
 
@@ -379,18 +379,19 @@ def _analyze_m1(df: pd.DataFrame) -> TFResult:
     elif sr_loc == "resistance":
         puts  += 1; score += 10; reasons.append(f"Cerca resistencia M1 ({sr_dist*100:.2f}%)")
 
-    # ── Decisión ─────────────────────────────────────────────
-    # En M1 REQUERIMOS patrón de vela para emitir señal
-    if not has_pattern:
-        res.reasons = reasons or ["Sin patron de vela M1"]
-        return res
-
+    # ── Decisión M1 ──────────────────────────────────────────
+    # Patrón de vela desempata; sin patrón se necesita ventaja >= 2 indicadores
     if calls > puts:
-        res.direction = "CALL" if pat_dir == "CALL" or calls - puts > 1 else None
+        if has_pattern and pat_dir == "CALL":
+            res.direction = "CALL"
+        elif calls - puts >= 2:
+            res.direction = "CALL"
     elif puts > calls:
-        res.direction = "PUT" if pat_dir == "PUT" or puts - calls > 1 else None
-    else:
-        # Empate: el patrón desempata
+        if has_pattern and pat_dir == "PUT":
+            res.direction = "PUT"
+        elif puts - calls >= 2:
+            res.direction = "PUT"
+    elif has_pattern:
         res.direction = pat_dir
 
     res.score   = min(score, 100)
@@ -677,7 +678,7 @@ def analyze(
     max_dir = max(calls, puts)
 
     best_score = max((r.score for r in tf_results), default=0)
-    need = 1 if best_score >= 65 else MIN_TF_AGREE
+    need = MIN_TF_AGREE  # siempre 1 — cada TF puede generar señal independiente
 
     if max_dir < need:
         return None
